@@ -9,3 +9,11 @@ spring:
   h2:
     console:
       enabled: false
+
+# 空气分析的模型接入：兼容 OpenAI 协议，密钥经环境变量注入，不写入仓库
+atmosphere:
+  llm:
+    base-url: https://api.deepseek.com
+    api-key: ${ATMOSPHERE_LLM_API_KEY:}
+    model: deepseek-chat
+    timeout: 30s
