@@ -24,4 +24,5 @@ jobs:
           cache: maven
 
       - name: 运行全量测试
+        working-directory: apps/backend
         run: mvn -B test

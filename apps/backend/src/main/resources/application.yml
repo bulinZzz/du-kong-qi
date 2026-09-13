@@ -1,0 +1,11 @@
+spring:
+  application:
+    name: du-kong-qi
+  datasource:
+    url: jdbc:h2:mem:example;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  h2:
+    console:
+      enabled: false
