@@ -1,6 +1,7 @@
 package com.xingyun.dukongqi.module.atmosphere.infrastructure.integration.openai;
 
 import com.xingyun.dukongqi.module.atmosphere.api.AnalysisUnavailableException;
+import com.xingyun.dukongqi.module.atmosphere.api.InsufficientContentException;
 import com.xingyun.dukongqi.module.atmosphere.application.port.AtmosphereAnalyzer;
 import com.xingyun.dukongqi.module.atmosphere.domain.model.AtmosphereAnalysis;
 import com.xingyun.dukongqi.module.atmosphere.domain.model.FlameIntensity;
@@ -88,13 +89,16 @@ public class OpenAiAtmosphereAnalyzer implements AtmosphereAnalyzer {
         }
     }
 
-    private AtmosphereAnalysis toAnalysis(OpenAiChatResponse response) {
+    AtmosphereAnalysis toAnalysis(OpenAiChatResponse response) {
         String content = messageContent(response);
         if (StringUtils.isBlank(content)) {
             throw new AnalysisUnavailableException("模型未返回分析内容");
         }
 
         AnalysisPayload payload = readPayload(content);
+        if (Boolean.TRUE.equals(payload.insufficientContent())) {
+            throw new InsufficientContentException("页面内容不足以分析");
+        }
         try {
             return new AtmosphereAnalysis(
                     new FlameIntensity(requireField(payload.flameIntensity(), "flameIntensity")),
@@ -133,12 +137,14 @@ public class OpenAiAtmosphereAnalyzer implements AtmosphereAnalyzer {
     }
 
     /**
-     * 模型输出的原始结构：字段允许缺失或越界，是否可用由领域模型判定。
+     * 模型输出的原始结构：字段允许缺失或越界，是否可用由领域模型判定；
+     * 模型拒绝判断时只给出 {@code insufficientContent}。
      */
     public record AnalysisPayload(
             Integer flameIntensity,
             String summary,
             List<String> evidence,
-            Double confidence) {
+            Double confidence,
+            Boolean insufficientContent) {
     }
 }

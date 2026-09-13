@@ -21,6 +21,8 @@
 
     <properties>
         <java.version>25</java.version>
+        <!-- 评测用例默认排除，手动运行时覆盖本属性 -->
+        <excluded.groups>evaluation</excluded.groups>
     </properties>
 
     <dependencies>
@@ -102,6 +104,14 @@
                             <version>1.18.48</version>
                         </path>
                     </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+            <!-- 评测用例需要真实模型访问，默认排除，手动运行：mvn test -Dgroups=evaluation -Dexcluded.groups= -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <excludedGroups>${excluded.groups}</excludedGroups>
                 </configuration>
             </plugin>
             <!-- Spring Boot：将项目打包为可执行 JAR -->
