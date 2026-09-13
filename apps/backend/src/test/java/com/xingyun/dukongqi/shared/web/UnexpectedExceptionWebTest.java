@@ -19,7 +19,7 @@ import org.springframework.web.context.WebApplicationContext;
  * → {@code GlobalExceptionHandler} 兜底 → 500 ProblemDetail。
  *
  * <p>与 {@link GlobalExceptionHandlerTest} 中直接调用处理器的单元测试不同，
- * 本测试证明 Spring MVC 的异常分发确实将技术异常路由到兜底处理器而非业务异常处理器，
+ * 本测试证明 Spring MVC 的异常分发确实将技术异常路由到兜底处理器，
  * 且内部异常信息不出现在响应体中。
  */
 @SpringBootTest

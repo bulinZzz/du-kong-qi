@@ -1,6 +1,5 @@
 package com.xingyun.dukongqi.shared.web;
 
-import com.xingyun.dukongqi.shared.exception.BusinessException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -16,22 +15,6 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
-
-    /**
-     * 业务规则拒绝 → 409 Conflict。
-     */
-    @ExceptionHandler(BusinessException.class)
-    ProblemDetail onBusinessException(BusinessException exception) {
-        log.warn("业务规则拒绝：{}", exception.getMessage());
-
-        ProblemDetail problemDetail =
-                ProblemDetail.forStatusAndDetail(
-                        HttpStatus.CONFLICT,
-                        exception.getMessage()
-                );
-        problemDetail.setTitle("Business Rule Violation");
-        return problemDetail;
-    }
 
     /**
      * 未预期异常 → 500 Internal Server Error。

@@ -34,7 +34,7 @@ public interface ExampleApi {
      * 重命名示例聚合。
      *
      * <p>{@code newName} 不得为 {@code null}（编程契约，快速失败）；新名称与当前名称相同
-     * 属聚合不变量违规，抛出 {@code BusinessException}。</p>
+     * 属聚合不变量违规，抛出 {@code IllegalStateException}。</p>
      *
      * @param command 重命名入参
      * @return 聚合存在且重命名成功时返回 {@code true}；聚合不存在属预期缺失，返回 {@code false}

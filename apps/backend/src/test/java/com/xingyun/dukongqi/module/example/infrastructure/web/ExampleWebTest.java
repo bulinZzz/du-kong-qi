@@ -115,21 +115,6 @@ class ExampleWebTest {
     }
 
     @Test
-    void rename_should_return_problem_detail_409_when_name_is_unchanged() throws Exception {
-        mockMvc.perform(put("/examples/{id}", existingId.value())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "name": "旧名称"
-                                }
-                                """))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.status").value(409))
-                .andExpect(jsonPath("$.title").value("Business Rule Violation"))
-                .andExpect(jsonPath("$.detail").value("新名称与当前名称相同"));
-    }
-
-    @Test
     void rename_should_return_400_when_request_is_invalid() throws Exception {
         mockMvc.perform(put("/examples/{id}", existingId.value())
                         .contentType(MediaType.APPLICATION_JSON)

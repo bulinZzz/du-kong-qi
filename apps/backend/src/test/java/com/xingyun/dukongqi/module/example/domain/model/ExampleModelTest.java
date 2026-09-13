@@ -3,7 +3,6 @@ package com.xingyun.dukongqi.module.example.domain.model;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.xingyun.dukongqi.shared.exception.BusinessException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -87,7 +86,7 @@ class ExampleModelTest {
             ExampleModel model = ExampleModel.reconstitute(new ExampleId(1L), "E001", "同名");
 
             assertThatThrownBy(() -> model.rename("同名"))
-                    .isInstanceOf(BusinessException.class)
+                    .isInstanceOf(IllegalStateException.class)
                     .hasMessage("新名称与当前名称相同");
         }
 

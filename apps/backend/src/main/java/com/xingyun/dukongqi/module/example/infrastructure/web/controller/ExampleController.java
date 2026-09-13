@@ -60,8 +60,7 @@ public class ExampleController {
     }
 
     /**
-     * 重命名示例聚合：不存在返回 404，同名拒绝（聚合不变量违规）由全局异常翻译器
-     * 转为 409，成功返回 204。
+     * 重命名示例聚合：不存在返回 404，成功返回 204。
      */
     @PutMapping("/{id}")
     public ResponseEntity<Void> rename(@PathVariable Long id, @Valid @RequestBody ExampleRenameRequest request) {
