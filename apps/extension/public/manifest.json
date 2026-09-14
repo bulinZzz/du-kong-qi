@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "读空气",
+  "version": "0.1.0",
+  "description": "让 AI 帮你读懂互联网的空气",
+  "action": {
+    "default_title": "读空气"
+  },
+  "permissions": ["activeTab", "scripting"],
+  "background": {
+    "service_worker": "background.js"
+  }
+}

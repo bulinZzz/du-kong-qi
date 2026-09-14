@@ -19,6 +19,10 @@ target/
 .factorypath
 .springBeans
 
+# ========== Node / 前端 ==========
+node_modules/
+dist/
+
 # ========== OS Files ==========
 .DS_Store
 Thumbs.db
