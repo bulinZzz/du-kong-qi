@@ -4,12 +4,12 @@ on:
   push:
   pull_request:
 
-# 仅运行测试，无需写权限
+# 仅运行测试与构建，无需写权限
 permissions:
   contents: read
 
 jobs:
-  test:
+  backend:
     runs-on: ubuntu-latest
     steps:
       - name: 检出代码
@@ -26,3 +26,21 @@ jobs:
       - name: 运行全量测试
         working-directory: apps/backend
         run: mvn -B test
+
+  extension:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      # 版本须与本地开发使用的 Node 保持一致
+      - name: 配置 Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: apps/extension/package-lock.json
+
+      - name: 运行类型检查与构建
+        working-directory: apps/extension
+        run: npm ci && npm run typecheck && npm run build
