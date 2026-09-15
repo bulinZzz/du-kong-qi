@@ -1,11 +1,13 @@
 /** 浮窗要展示的内容。 */
 export type PanelView =
+  | { kind: 'loading' }
   | { kind: 'extracted'; charCount: number; preview: string }
   | { kind: 'empty'; retried: boolean };
 
 /** 浮窗上的操作：渲染层只负责触发，具体行为由内容脚本决定。 */
 export type PanelActions = {
-  loadDiscussion: () => void;
+  /** 兜底按钮的动作：滚到讨论区再读一次 */
+  readDiscussion: () => void;
 };
 
 /** 预览里最多展示的字数。 */
@@ -38,6 +40,11 @@ function createPanel(view: PanelView, actions: PanelActions): HTMLElement {
   ].join(';');
   panel.append(createTitle());
 
+  if (view.kind === 'loading') {
+    panel.append(createLine('正在读评论区…', 'opacity: 0.85'));
+    return panel;
+  }
+
   if (view.kind === 'extracted') {
     panel.append(createLine(`已抓到 ${view.charCount} 字`, ''), createPreview(view.preview));
     return panel;
@@ -48,10 +55,10 @@ function createPanel(view: PanelView, actions: PanelActions): HTMLElement {
     createLine(
       view.retried
         ? '评论可能要先登录才显示，你也可以自己往下滚一点再点一次。'
-        : '评论要滚动到附近才会加载，我先去把它读完。',
+        : '这个页面要滚到评论区才会加载，要我去读一下吗？',
       'font-size: 12px; opacity: 0.75',
     ),
-    createButton(view.retried ? '再试一次' : '好，去读评论区', actions.loadDiscussion),
+    createButton(view.retried ? '再试一次' : '好，去读评论区', actions.readDiscussion),
   );
   return panel;
 }

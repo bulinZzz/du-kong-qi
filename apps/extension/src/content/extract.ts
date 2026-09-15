@@ -42,13 +42,22 @@ const NOISE_TAGS = new Set([
 
 const NOT_READY: DiscussionContent = { status: 'notReady' };
 
-/** 等待讨论内容渲染出来的最长等待时间。 */
-const LOAD_TIMEOUT_MS = 5000;
+/** 无感加载的最长等待时间。 */
+const QUIET_LOAD_TIMEOUT_MS = 8000;
 
-/** 等待期间轮询的间隔。 */
-const LOAD_POLL_INTERVAL_MS = 300;
+/** 判定内容已渲染稳定的两次快照间隔。 */
+const SETTLE_INTERVAL_MS = 500;
 
-/** 容器还没挂载时逐屏下推的最大步数：讨论区通常在首屏下方不远处。 */
+/** 分析所需的最小样本量：达到它并且连续两次快照一致，才算读到足够的讨论内容。 */
+const MIN_SAMPLE_LENGTH = 2000;
+
+/** 把讨论容器搬进视口时，让它的顶部停在视口内这个位置。 */
+const QUIET_TOP_OFFSET = 120;
+
+/** 兜底滚动路径的轮询间隔。 */
+const SCROLL_POLL_INTERVAL_MS = 300;
+
+/** 兜底滚动路径里容器还没挂载时，逐屏下推的最大步数：讨论区通常在首屏下方不远处。 */
 const MAX_SCROLL_STEPS = 6;
 
 /**
@@ -77,28 +86,108 @@ export function extractDiscussion(): DiscussionContent {
 }
 
 /**
- * 把讨论区滚进视口并等它渲染出来。
+ * 无感加载：把讨论容器搬进视口，但不动页面，等它渲染出足够的样本。
  *
- * 视频站的评论要滚动到附近才加载，用户停在页面顶部时读不到任何内容。
- * 这个动作只由用户点击触发，因此滚动是他预期内的。
+ * 视频站的评论要进入视口才会加载。这里用相对定位把容器挪进视口——相对定位不改变布局，
+ * 容器原来的位置和页面滚动位置都不变——再配合透明与禁止交互，用户看不到任何变化。
+ * 容器已经在视口里时不搬：那说明加载由页面自己驱动。
  */
-export async function loadDiscussion(): Promise<DiscussionContent> {
-  const deadline = Date.now() + LOAD_TIMEOUT_MS;
+export async function loadDiscussionQuietly(): Promise<DiscussionContent> {
+  const deadline = Date.now() + QUIET_LOAD_TIMEOUT_MS;
+  const target = await waitForContainer(deadline);
+  if (target === null) {
+    return extractDiscussion();
+  }
+
+  const restore =
+    target instanceof HTMLElement && !isInViewport(target) ? moveIntoViewportQuietly(target) : null;
+  try {
+    return await waitForSettledSample(deadline);
+  } finally {
+    restore?.();
+  }
+}
+
+/**
+ * 兜底加载：真的滚到讨论区，等它渲染。
+ *
+ * 加载不由可见性驱动的站点走这条路径，位移是用户点按钮换来的。
+ */
+export async function loadDiscussionByScrolling(): Promise<DiscussionContent> {
+  const deadline = Date.now() + QUIET_LOAD_TIMEOUT_MS;
   let content = extractDiscussion();
   let scrolledSteps = 0;
 
   while (content.status === 'notReady' && Date.now() < deadline) {
-    const target = findScrollTarget();
+    const target = findDiscussionContainer();
     if (target !== null) {
       target.scrollIntoView({ block: 'center' });
     } else if (scrolledSteps < MAX_SCROLL_STEPS) {
       window.scrollBy({ top: Math.round(window.innerHeight * 0.8) });
       scrolledSteps += 1;
     }
-    await delay(LOAD_POLL_INTERVAL_MS);
+    await delay(SCROLL_POLL_INTERVAL_MS);
     content = extractDiscussion();
   }
   return content;
+}
+
+/** 等讨论容器挂载出来：它可能比页面主体晚出现。 */
+async function waitForContainer(deadline: number): Promise<Element | null> {
+  let container = findDiscussionContainer();
+  while (container === null && Date.now() < deadline) {
+    await delay(SETTLE_INTERVAL_MS);
+    container = findDiscussionContainer();
+  }
+  return container;
+}
+
+/**
+ * 把容器搬进视口：视觉位置进视口，布局与滚动位置都不变。
+ * 返回还原函数，调用方必须在结束时调用，否则容器会一直停在被改状态。
+ */
+function moveIntoViewportQuietly(target: HTMLElement): () => void {
+  const originalStyle = target.getAttribute('style');
+  const shift = Math.round(target.getBoundingClientRect().top - QUIET_TOP_OFFSET);
+
+  target.style.position = 'relative';
+  target.style.top = `${-shift}px`;
+  target.style.opacity = '0';
+  target.style.pointerEvents = 'none';
+
+  return () => {
+    if (originalStyle === null) {
+      target.removeAttribute('style');
+    } else {
+      target.setAttribute('style', originalStyle);
+    }
+  };
+}
+
+/** 等到样本达到下限、且连续两次快照一致，说明渲染已经稳定。超时则返回最后读到的东西。 */
+async function waitForSettledSample(deadline: number): Promise<DiscussionContent> {
+  let previousText = '';
+  let content = extractDiscussion();
+
+  while (Date.now() < deadline) {
+    await delay(SETTLE_INTERVAL_MS);
+    content = extractDiscussion();
+
+    if (
+      content.status === 'ready' &&
+      content.charCount >= MIN_SAMPLE_LENGTH &&
+      content.text === previousText
+    ) {
+      return content;
+    }
+    previousText = content.status === 'ready' ? content.text : '';
+  }
+  return content;
+}
+
+function isInViewport(target: Element): boolean {
+  const rect = target.getBoundingClientRect();
+  return rect.bottom > 0 && rect.top < window.innerHeight;
 }
 
 function findSiteExpectation(): SiteExpectation | null {
@@ -118,7 +207,8 @@ function resolveExpectation(expectation: SiteExpectation): Element | ShadowRoot 
   return found.shadowRoot?.querySelector(expectation.innerShadowSelector) ?? null;
 }
 
-function findScrollTarget(): Element | null {
+/** 定位讨论容器本身（不是它内部的内容区）：滚动和搬运都以它为对象。 */
+function findDiscussionContainer(): Element | null {
   const expectation = findSiteExpectation();
   if (expectation !== null) {
     return document.querySelector(expectation.selector);
