@@ -3,14 +3,17 @@ import type { AnalysisFailureReason, AtmosphereAnalysis } from '../shared/protoc
 /** 浮窗要展示的内容。 */
 export type PanelView =
   | { kind: 'loading'; phase: 'readingComments' | 'analyzing' }
-  | { kind: 'result'; analysis: AtmosphereAnalysis }
+  | { kind: 'result'; analysis: AtmosphereAnalysis; expired: boolean }
   | { kind: 'failure'; reason: AnalysisFailureReason }
+  | { kind: 'pageChanged' }
   | { kind: 'empty'; retried: boolean };
 
 /** 浮窗上的操作：渲染层只负责触发，具体行为由内容脚本决定。 */
 export type PanelActions = {
   /** 兜底按钮的动作：滚到讨论区再读一次 */
   readDiscussion: () => void;
+  /** 结果过期或换页后的重新分析 */
+  reanalyze: () => void;
 };
 
 /** 加载体现在两个阶段：评论要读，空气要判，等待时长都不短。 */
@@ -49,6 +52,16 @@ const MAX_EVIDENCE = 3;
 const LOW_CONFIDENCE = 0.5;
 
 /**
+ * 结果作废时的提示。
+ *
+ * 同页继续加载时保留上一次的分数——它没有错，只是样本变了；
+ * 整页换掉时不给旧分数——那个分数与当前页面的讨论毫无关系。
+ */
+const EXPIRED_NOTE = '讨论有新变化，要重算吗？';
+const PAGE_CHANGED_NOTE = '页面换过了，要重新分析吗？';
+const REANALYZE_LABEL = '重新分析';
+
+/**
  * 浮窗的渲染入口。
  *
  * 这是唯一与 UI 写法耦合的地方：将来浮窗变复杂、需要引入框架时，替换的是这一层，
@@ -69,6 +82,19 @@ function createPanel(view: PanelView, actions: PanelActions): HTMLElement {
 
     case 'result':
       panel.append(...createResult(view.analysis));
+      if (view.expired) {
+        panel.append(
+          createLine(EXPIRED_NOTE, 'font-size: 12px; opacity: 0.75'),
+          createButton(REANALYZE_LABEL, actions.reanalyze),
+        );
+      }
+      break;
+
+    case 'pageChanged':
+      panel.append(
+        createLine(PAGE_CHANGED_NOTE, ''),
+        createButton(REANALYZE_LABEL, actions.reanalyze),
+      );
       break;
 
     case 'failure':

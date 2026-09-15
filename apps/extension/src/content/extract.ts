@@ -54,6 +54,14 @@ const SETTLE_INTERVAL_MS = 500;
 /** 分析所需的最小样本量：达到它并且连续两次快照一致，才算读到足够的讨论内容。 */
 const MIN_SAMPLE_LENGTH = 2000;
 
+/**
+ * 送去分析的最大长度。
+ *
+ * 后端还会再截断一次作为兜底，但"这次分析覆盖了哪一段"由这里决定：过期判断比对的也是这一段，
+ * 否则用户只是往下翻、让窗口之外加载出更多评论，也会被提示"内容变了"。
+ */
+const MAX_SAMPLE_CHARS = 10000;
+
 /** 把讨论容器搬进视口时，让它的顶部停在视口内这个位置。 */
 const QUIET_TOP_OFFSET = 120;
 
@@ -191,6 +199,11 @@ async function waitForSettledSample(deadline: number): Promise<DiscussionContent
 function isInViewport(target: Element): boolean {
   const rect = target.getBoundingClientRect();
   return rect.bottom > 0 && rect.top < window.innerHeight;
+}
+
+/** 取出送去分析的那一段：讨论的前部内容。 */
+export function takeSample(text: string): string {
+  return text.slice(0, MAX_SAMPLE_CHARS);
 }
 
 function findSiteExpectation(): SiteExpectation | null {

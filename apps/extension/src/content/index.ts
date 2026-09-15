@@ -3,13 +3,28 @@ import {
   extractDiscussion,
   loadDiscussionByScrolling,
   loadDiscussionQuietly,
+  takeSample,
 } from './extract';
 import { type PanelActions, renderPanel } from './panel';
+import {
+  type DiscussionSnapshot,
+  hasContentChanged,
+  hasPageChanged,
+  snapshotOf,
+  takeSnapshot,
+  WATCH_INTERVAL_MS,
+} from './watch';
 import { type AnalyzeMessage, type ExtensionMessage, SHOW_PANEL } from '../shared/messages';
-import type { AnalysisOutcome } from '../shared/protocol';
+import type { AnalysisOutcome, AtmosphereAnalysis } from '../shared/protocol';
 
 /** 宿主元素标识：重复注入时据此判断是否已经就绪。 */
 const HOST_ID = 'du-kong-qi-host';
+
+/** 页面变化轮询的定时器。 */
+let watchTimer: number | null = null;
+
+/** 最近一次成功的结果：内容变多时要把它和提示一起留在浮窗上。 */
+let lastAnalysis: AtmosphereAnalysis | null = null;
 
 /**
  * 内容脚本入口：注入时只准备宿主元素，收到后台指令后才提取正文并渲染浮窗。
@@ -36,6 +51,8 @@ function start(): void {
  * 无感加载不移动页面，用户在正常路径上只会看到加载提示与结果。
  */
 async function runAnalysis(host: HTMLElement): Promise<void> {
+  stopWatching();
+
   const current = extractDiscussion();
   if (current.status === 'ready') {
     await analyzeAndShow(host, current);
@@ -65,13 +82,71 @@ async function readByScrolling(host: HTMLElement): Promise<void> {
 
 async function analyzeAndShow(host: HTMLElement, content: DiscussionReady): Promise<void> {
   renderPanel(host, { kind: 'loading', phase: 'analyzing' }, createActions(host));
-  const outcome = await requestAnalysis(content.text);
+
+  const sample = takeSample(content.text);
+  const outcome = await requestAnalysis(sample);
 
   if (outcome.status === 'ok') {
-    renderPanel(host, { kind: 'result', analysis: outcome.analysis }, createActions(host));
+    lastAnalysis = outcome.analysis;
+    renderPanel(
+      host,
+      { kind: 'result', analysis: outcome.analysis, expired: false },
+      createActions(host),
+    );
+    watchForChanges(host, snapshotOf(sample));
     return;
   }
+
+  lastAnalysis = null;
   renderPanel(host, { kind: 'failure', reason: outcome.reason }, createActions(host));
+}
+
+/**
+ * 分析成功后盯住页面变化。
+ *
+ * 基线取的是刚送去分析的那一段，而不是此刻重读页面：两者之间页面若又加载了内容，
+ * 那些内容并没有被这次分析覆盖，不该被当成已分析。
+ */
+function watchForChanges(host: HTMLElement, baseline: DiscussionSnapshot): void {
+  stopWatching();
+  watchTimer = window.setInterval(() => {
+    checkChanges(host, baseline);
+  }, WATCH_INTERVAL_MS);
+}
+
+function stopWatching(): void {
+  if (watchTimer !== null) {
+    window.clearInterval(watchTimer);
+    watchTimer = null;
+  }
+}
+
+/** 页面不可见时跳过：用户在别的标签页上，没有必要读这个页面。 */
+function checkChanges(host: HTMLElement, baseline: DiscussionSnapshot): void {
+  if (document.visibilityState !== 'visible') {
+    return;
+  }
+
+  const current = takeSnapshot();
+  if (current === null) {
+    return;
+  }
+
+  if (hasPageChanged(baseline, current)) {
+    stopWatching();
+    lastAnalysis = null;
+    renderPanel(host, { kind: 'pageChanged' }, createActions(host));
+    return;
+  }
+
+  if (hasContentChanged(baseline, current) && lastAnalysis !== null) {
+    stopWatching();
+    renderPanel(
+      host,
+      { kind: 'result', analysis: lastAnalysis, expired: true },
+      createActions(host),
+    );
+  }
 }
 
 /** 请求交给后台：内容脚本的跨域请求受所在页面约束，后台不受。 */
@@ -92,6 +167,9 @@ function createActions(host: HTMLElement): PanelActions {
   return {
     readDiscussion: () => {
       void readByScrolling(host);
+    },
+    reanalyze: () => {
+      void runAnalysis(host);
     },
   };
 }
