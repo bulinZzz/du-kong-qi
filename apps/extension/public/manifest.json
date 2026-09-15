@@ -7,6 +7,7 @@
     "default_title": "读空气"
   },
   "permissions": ["activeTab", "scripting"],
+  "host_permissions": ["http://localhost:8080/*"],
   "background": {
     "service_worker": "background.js"
   }

@@ -8,6 +8,9 @@ export type DiscussionContent =
   | { status: 'ready'; text: string; charCount: number }
   | { status: 'notReady' };
 
+/** 已经读到内容的那一种，调用方判过之后传它，免得下游再判一次。 */
+export type DiscussionReady = Extract<DiscussionContent, { status: 'ready' }>;
+
 /** 已适配站点：讨论容器一定存在，只是要滚动到附近才渲染。 */
 type SiteExpectation = {
   hostSuffix: string;
