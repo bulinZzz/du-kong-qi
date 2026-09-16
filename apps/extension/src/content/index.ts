@@ -17,8 +17,19 @@ import {
 import { type AnalyzeMessage, type ExtensionMessage, SHOW_PANEL } from '../shared/messages';
 import type { AnalysisOutcome, AtmosphereAnalysis } from '../shared/protocol';
 
-/** 宿主元素标识：重复注入时据此判断是否已经就绪。 */
+/** 宿主元素标识：重复注入时复用它，不让宿主要在页面上堆成一串。 */
 const HOST_ID = 'du-kong-qi-host';
+
+/**
+ * 上一次注入登记的监听器。
+ *
+ * 工具栏每点一次就会注入一次脚本，扩展重新加载后页面里还留着上一版脚本的宿主元素，
+ * 只听"宿主在不在"会让新脚本直接退出——新扩展上下文里没有监听者，浮窗就再也打不开。
+ * 所以这里只复用宿主、换上新监听器，并摘掉旧的那个。
+ */
+const world = globalThis as typeof globalThis & {
+  __duKongQi?: { listener: (message: ExtensionMessage) => void };
+};
 
 /** 页面变化轮询的定时器。 */
 let watchTimer: number | null = null;
@@ -31,19 +42,28 @@ let lastAnalysis: AtmosphereAnalysis | null = null;
  * 每次点击都重新提取，这样页面内容变了之后重新分析拿到的就是新的文本。
  */
 function start(): void {
-  if (document.getElementById(HOST_ID) !== null) {
-    return;
+  const previous = world.__duKongQi?.listener;
+  if (previous !== undefined) {
+    chrome.runtime.onMessage.removeListener(previous);
   }
 
-  const host = document.createElement('div');
-  host.id = HOST_ID;
-  document.documentElement.append(host);
+  const host = document.getElementById(HOST_ID) ?? createHost();
 
-  chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
+  const listener = (message: ExtensionMessage): void => {
     if (message.type === SHOW_PANEL.type) {
       void runAnalysis(host);
     }
-  });
+  };
+
+  world.__duKongQi = { listener };
+  chrome.runtime.onMessage.addListener(listener);
+}
+
+function createHost(): HTMLElement {
+  const host = document.createElement('div');
+  host.id = HOST_ID;
+  document.documentElement.append(host);
+  return host;
 }
 
 /**
@@ -170,6 +190,12 @@ function createActions(host: HTMLElement): PanelActions {
     },
     reanalyze: () => {
       void runAnalysis(host);
+    },
+    close: () => {
+      // 关掉浮窗同时停掉轮询：用户主动收工时不该还在读页面
+      stopWatching();
+      lastAnalysis = null;
+      host.replaceChildren();
     },
   };
 }
