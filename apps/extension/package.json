@@ -5,9 +5,10 @@
   "type": "module",
   "description": "读空气浏览器扩展：读取当前页面文本，展示空气分析结果。",
   "scripts": {
-    "build": "npm run build:background && npm run build:content",
+    "build": "npm run build:background && npm run build:content && npm run build:options",
     "build:background": "vite build --config vite.config.background.ts",
     "build:content": "vite build --config vite.config.ts",
+    "build:options": "vite build --config vite.config.options.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

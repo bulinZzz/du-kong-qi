@@ -6,8 +6,13 @@
   "action": {
     "default_title": "读空气"
   },
-  "permissions": ["activeTab", "scripting"],
+  "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": ["http://localhost:8080/*"],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
   "background": {
     "service_worker": "background.js"
   }

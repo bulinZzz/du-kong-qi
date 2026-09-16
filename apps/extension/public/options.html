@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>读空气 · 设置</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 32px 24px;
+        background: #f6f7f9;
+        color: #1d2129;
+        font: 14px/1.7 system-ui, sans-serif;
+      }
+
+      .card {
+        max-width: 520px;
+        margin: 0 auto;
+        padding: 22px 24px;
+        border: 1px solid #e3e5e8;
+        border-radius: 12px;
+        background: #fff;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 17px;
+      }
+
+      p {
+        margin: 0;
+      }
+
+      /* 这里的每一组颜色都按 4.5:1 的对比度选过：正文 14px 达不到要重挑，不能靠感觉 */
+      .muted {
+        color: #6b6f76;
+        font-size: 13px;
+      }
+
+      .row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-top: 14px;
+      }
+
+      .sites {
+        margin: 14px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .site {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 7px 0;
+        border-top: 1px solid #f0f1f3;
+      }
+
+      .notice {
+        margin-top: 12px;
+        color: #9a5b00;
+      }
+
+      button {
+        padding: 6px 12px;
+        border: none;
+        border-radius: 6px;
+        background: #3a67e0;
+        color: #fff;
+        font: inherit;
+        cursor: pointer;
+      }
+
+      button.plain {
+        background: #eef0f3;
+        color: #1d2129;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card" id="app"></main>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

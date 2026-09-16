@@ -5,7 +5,7 @@ import {
   loadDiscussionQuietly,
   takeSample,
 } from './extract';
-import { type PanelActions, renderPanel } from './panel';
+import { type PanelActions, renderPanel, setAutoOpen } from './panel';
 import {
   type DiscussionSnapshot,
   hasContentChanged,
@@ -14,21 +14,30 @@ import {
   takeSnapshot,
   WATCH_INTERVAL_MS,
 } from './watch';
-import { type AnalyzeMessage, type ExtensionMessage, SHOW_PANEL } from '../shared/messages';
+import { isAutoOpenEnabled, originOf } from '../shared/auto-open';
+import {
+  type AnalyzeMessage,
+  type ExtensionMessage,
+  type RequestAutoOpenMessage,
+  SHOW_PANEL,
+} from '../shared/messages';
 import type { AnalysisOutcome, AtmosphereAnalysis } from '../shared/protocol';
 
 /** 宿主元素标识：重复注入时复用它，不让宿主要在页面上堆成一串。 */
 const HOST_ID = 'du-kong-qi-host';
 
 /**
- * 上一次注入登记的监听器。
+ * 上一次注入登记的两个监听器。
  *
  * 工具栏每点一次就会注入一次脚本，扩展重新加载后页面里还留着上一版脚本的宿主元素，
  * 只听"宿主在不在"会让新脚本直接退出——新扩展上下文里没有监听者，浮窗就再也打不开。
- * 所以这里只复用宿主、换上新监听器，并摘掉旧的那个。
+ * 所以这里只复用宿主、换上新监听器，并摘掉旧的。
  */
 const world = globalThis as typeof globalThis & {
-  __duKongQi?: { listener: (message: ExtensionMessage) => void };
+  __duKongQi?: {
+    listener: (message: ExtensionMessage) => void;
+    onStorageChanged: () => void;
+  };
 };
 
 /** 页面变化轮询的定时器。 */
@@ -42,9 +51,10 @@ let lastAnalysis: AtmosphereAnalysis | null = null;
  * 每次点击都重新提取，这样页面内容变了之后重新分析拿到的就是新的文本。
  */
 function start(): void {
-  const previous = world.__duKongQi?.listener;
+  const previous = world.__duKongQi;
   if (previous !== undefined) {
-    chrome.runtime.onMessage.removeListener(previous);
+    chrome.runtime.onMessage.removeListener(previous.listener);
+    chrome.storage.onChanged.removeListener(previous.onStorageChanged);
   }
 
   const host = document.getElementById(HOST_ID) ?? createHost();
@@ -55,8 +65,21 @@ function start(): void {
     }
   };
 
-  world.__duKongQi = { listener };
+  // 授权变了就重画：浮窗底部那一行不该停在上一次的状态上
+  const onStorageChanged = (): void => {
+    void syncAutoOpen();
+  };
+
+  world.__duKongQi = { listener, onStorageChanged };
   chrome.runtime.onMessage.addListener(listener);
+  chrome.storage.onChanged.addListener(onStorageChanged);
+  void syncAutoOpen();
+}
+
+/** 把本站的授权状态读给渲染层。非 http(s) 页面没有可授权的站点，直接当作未开启。 */
+async function syncAutoOpen(): Promise<void> {
+  const origin = originOf(location.href);
+  setAutoOpen(origin !== null && (await isAutoOpenEnabled(origin)));
 }
 
 function createHost(): HTMLElement {
@@ -197,7 +220,27 @@ function createActions(host: HTMLElement): PanelActions {
       lastAnalysis = null;
       host.replaceChildren();
     },
+    enableAutoOpen: () => {
+      void requestAutoOpen();
+    },
   };
+}
+
+/** 授权页面必须在用户手势里请求权限，这里只请后台把它开出来。 */
+async function requestAutoOpen(): Promise<void> {
+  const origin = originOf(location.href);
+  if (origin === null) {
+    return;
+  }
+
+  const message: RequestAutoOpenMessage = { type: 'requestAutoOpen', origin };
+
+  try {
+    await chrome.runtime.sendMessage(message);
+  } catch (error) {
+    // 后台没有响应，通常是扩展刚被重新加载
+    console.error('读空气：打开授权页面失败', error);
+  }
 }
 
 start();

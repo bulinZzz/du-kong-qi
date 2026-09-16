@@ -14,7 +14,15 @@ export type ShowPanelMessage = { type: 'showPanel' };
  */
 export type AnalyzeMessage = { type: 'analyze'; text: string };
 
-export type ExtensionMessage = ShowPanelMessage | AnalyzeMessage;
+/**
+ * 内容脚本 → 后台：为这个站点开启"进入时自动打开"。
+ *
+ * 带上站点标识，是因为后台不必再去读发送方标签页的地址；
+ * 真正请求授权的是后台开出来的那个页面，内容脚本只负责转达意图。
+ */
+export type RequestAutoOpenMessage = { type: 'requestAutoOpen'; origin: string };
+
+export type ExtensionMessage = ShowPanelMessage | AnalyzeMessage | RequestAutoOpenMessage;
 
 export const SHOW_PANEL: ShowPanelMessage = { type: 'showPanel' };
 
@@ -25,4 +33,13 @@ export function isAnalyzeMessage(value: unknown): value is AnalyzeMessage {
 
   const candidate = value as Partial<AnalyzeMessage>;
   return candidate.type === 'analyze' && typeof candidate.text === 'string';
+}
+
+export function isRequestAutoOpenMessage(value: unknown): value is RequestAutoOpenMessage {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const candidate = value as Partial<RequestAutoOpenMessage>;
+  return candidate.type === 'requestAutoOpen' && typeof candidate.origin === 'string';
 }

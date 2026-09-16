@@ -16,6 +16,8 @@ export type PanelActions = {
   reanalyze: () => void;
   /** 关掉浮窗，并让内容脚本停掉页面变化的轮询 */
   close: () => void;
+  /** 开启本站的"进入时自动打开"：授权页面由后台开出来，这里只转达意图 */
+  enableAutoOpen: () => void;
 };
 
 /** 加载体现在两个阶段：评论要读，空气要判，等待时长都不短。 */
@@ -110,6 +112,9 @@ let minimized = false;
 let panelWidth = DEFAULT_PANEL_WIDTH;
 let panelHeight: number | null = null;
 
+/** 本站在不在"进入时自动打开"的名单里：浮窗底部那一行据此显示。 */
+let autoOpen = false;
+
 /** 上一次渲染的输入：折叠与展开时就地重画，不需要内容脚本再喊一次。 */
 let host: HTMLElement | null = null;
 let lastView: PanelView | null = null;
@@ -131,6 +136,19 @@ export function renderPanel(target: HTMLElement, view: PanelView, actions: Panel
   host = target;
   lastView = view;
   lastActions = actions;
+  paint();
+}
+
+/**
+ * 告知本站的自动打开状态。
+ *
+ * 它属于浮窗外围的开关，不属于浮窗要展示的内容，所以单独进来；变了就地重画一次。
+ */
+export function setAutoOpen(enabled: boolean): void {
+  if (autoOpen === enabled) {
+    return;
+  }
+  autoOpen = enabled;
   paint();
 }
 
@@ -186,7 +204,7 @@ function createPanel(view: PanelView, actions: PanelActions): HTMLElement {
   const body = createBody();
   const header = createHeader(actions);
   enableDrag(panel, header);
-  panel.append(header, body);
+  panel.append(header, body, createAutoOpenLine(actions));
 
   switch (view.kind) {
     case 'loading':
@@ -581,6 +599,33 @@ function createHeader(actions: PanelActions): HTMLElement {
   return header;
 }
 
+/**
+ * 浮窗底部的一行：本站的自动打开开关。
+ *
+ * 这里调不了 chrome.permissions——内容脚本没有这个 API——所以只把意图交出去，
+ * 请求授权的是读空气自己的页面（Chrome 要求在用户手势里请求）。
+ */
+function createAutoOpenLine(actions: PanelActions): HTMLElement {
+  const button = document.createElement('button');
+  button.textContent = autoOpen ? '已在本站自动打开' : '进入本站时自动打开';
+  button.title = autoOpen ? '点击可关闭' : '进入这个网站的页面时自动打开浮窗';
+  button.style.cssText = [
+    'margin-top: 6px',
+    'padding: 0',
+    'border: none',
+    'background: transparent',
+    'color: inherit',
+    'font: 13px/1.6 system-ui, sans-serif',
+    'text-align: left',
+    'cursor: pointer',
+    // 压在毛玻璃上时底色会跟着页面走，所以透明度不能压太低：0.6 在亮页面上会掉到 4 左右
+    `opacity: ${autoOpen ? 0.8 : 0.9}`,
+  ].join(';');
+
+  button.addEventListener('click', actions.enableAutoOpen);
+  return button;
+}
+
 /** 标题栏上的小按钮：不参与拖动，也不让事件冒泡到页面。 */
 function createIconButton(
   kind: 'minimize' | 'close',
@@ -664,7 +709,7 @@ function createButton(label: string, onClick: () => void): HTMLElement {
     'padding: 6px 10px',
     'border: none',
     'border-radius: 6px',
-    'background: #4c7dff',
+    'background: #3a67e0',
     'color: #fff',
     'font: inherit',
     'cursor: pointer',
