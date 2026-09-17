@@ -8,12 +8,20 @@ const BACKEND_BASE_URL = 'http://localhost:8080';
 /** 一次分析的等待上限：后端还要调模型，比普通接口给得宽一些。 */
 const REQUEST_TIMEOUT_MS = 20000;
 
+/** 兜底窗口的尺寸：放得下标题、一句说明和一个按钮就够。 */
+const AUTHORIZE_WINDOW_WIDTH = 460;
+const AUTHORIZE_WINDOW_HEIGHT = 250;
+
 /**
  * 后台 Service Worker。
  *
- * 三件事：把工具栏点击转成一次内容脚本注入加展示指令；在用户授权过的网站上自动做同样的事；
- * 替内容脚本请求后端——内容脚本发出的跨域请求受所在页面约束，后台不受此限。
+ * 四件事：把工具栏点击转成一次内容脚本注入加展示指令；在用户授权过的网站上自动做同样的事；
+ * 替内容脚本请求后端——内容脚本发出的跨域请求受所在页面约束，后台不受此限；
+ * 以及在浮窗嵌不进授权界面时，把授权页开成独立窗口。
  */
+
+// 浮窗位置记在会话存储里，而会话存储默认不对内容脚本开放，这里显式放开
+void chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' });
 
 chrome.action.onClicked.addListener(async (tab) => {
   const tabId = tab.id;
@@ -65,7 +73,9 @@ async function showPanel(tabId: number): Promise<void> {
 }
 
 /**
- * 打开授权页面。
+ * 打开授权页（独立窗口）。
+ *
+ * 这是兜底路径：正常情况下授权界面嵌在浮窗里，只有站点不允许嵌扩展页面时才走这里。
  *
  * 请求 host 权限必须在用户手势里进行（Chrome 的硬性要求），而内容脚本没有
  * chrome.permissions 这个 API，所以这里只把页面开出来，真正请求授权的是页面上的那次点击。
@@ -74,9 +84,39 @@ async function openAuthorizationPage(origin: string): Promise<void> {
   const url = chrome.runtime.getURL(`options.html?origin=${encodeURIComponent(origin)}`);
 
   try {
-    await chrome.tabs.create({ url });
+    await chrome.windows.create({
+      url,
+      type: 'popup',
+      width: AUTHORIZE_WINDOW_WIDTH,
+      height: AUTHORIZE_WINDOW_HEIGHT,
+      ...(await popupPosition()),
+    });
   } catch (error) {
-    console.error('读空气：打开授权页面失败', error);
+    console.error('读空气：打开授权弹窗失败', error);
+  }
+}
+
+/**
+ * 弹窗落在当前窗口的中上位置。
+ *
+ * 不指定位置时由系统决定，实测会跑到屏幕左下角——那里既不像一次提问，离用户正在看的地方也远。
+ * 取不到窗口信息就不给位置，让系统自己安排，总比不开好。
+ */
+async function popupPosition(): Promise<{ left?: number; top?: number }> {
+  try {
+    const bounds = await chrome.windows.getLastFocused();
+    const left = bounds.left ?? 0;
+    const top = bounds.top ?? 0;
+    const windowWidth = bounds.width ?? AUTHORIZE_WINDOW_WIDTH;
+    const windowHeight = bounds.height ?? AUTHORIZE_WINDOW_HEIGHT;
+
+    return {
+      // 水平居中、纵向偏上：像一个从上面落下来的对话框
+      left: Math.round(left + Math.max((windowWidth - AUTHORIZE_WINDOW_WIDTH) / 2, 0)),
+      top: Math.round(top + Math.max((windowHeight - AUTHORIZE_WINDOW_HEIGHT) / 3, 0)),
+    };
+  } catch {
+    return {};
   }
 }
 

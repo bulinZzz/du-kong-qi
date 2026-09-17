@@ -16,8 +16,12 @@ export type PanelActions = {
   reanalyze: () => void;
   /** 关掉浮窗，并让内容脚本停掉页面变化的轮询 */
   close: () => void;
-  /** 开启本站的"进入时自动打开"：授权页面由后台开出来，这里只转达意图 */
-  enableAutoOpen: () => void;
+  /** 授权界面（扩展自己的页面）的地址：面板自己不拼扩展地址，只管用 */
+  autoOpenFrameUrl: string;
+  /** 兜底：面板里嵌不进来时，请后台把授权页单独开出来 */
+  openAutoOpenPage: () => void;
+  /** 拖动、缩放或收起展开之后，把浮窗现在的样子交出去记下（内容脚本负责存，渲染层不碰 chrome） */
+  rememberState: (state: PanelState) => void;
 };
 
 /** 加载体现在两个阶段：评论要读，空气要判，等待时长都不短。 */
@@ -68,22 +72,33 @@ const REANALYZE_LABEL = '重新分析';
 /** 浮窗尺寸与贴边留白。上限不设常量：跟屏幕走，用户不该撞到一个数字上。 */
 const DEFAULT_PANEL_WIDTH = 280;
 /**
- * 下限只保一件事：标题栏上的两个按钮还够得着。
+ * 尺寸下限：小到控件自己装不下为止。
  *
- * 它不是可读性的下限——用户想把窗口压细，多半是因为它挡了页面上的东西，
- * 这时候他在意的是窗口有多小，不是窗口里的字好不好读。
+ * 116 = 标题栏上四个 20px 的按钮 + 三个 2px 间隔 + 左右各 14px 内边距 + 左右各 1px 描边；
+ * 49 = 标题栏一行 22px（14px 字号 × 1.6）+ 上下各 12px 内边距 + 上下各 1px 描边。
+ *
+ * 这不是偏好，也不是可读性——用户把窗口压小，多半是因为它挡住了页面上的东西，
+ * 这时候他在意的是窗口有多小，不是里面的字好不好读。真正不能越过的只有一条：
+ * 几个按钮还得在窗口里，否则用户丢的不是读数，是"回得去"。
  */
-const MIN_PANEL_WIDTH = 80;
-const MIN_PANEL_HEIGHT = 56;
-const PANEL_MARGIN = 16;
+const MIN_PANEL_WIDTH = 116;
+const MIN_PANEL_HEIGHT = 49;
+/** 首屏落点与贴边留白：16px 时右边那条边离页面太近，看着挤，用 24 */
+const PANEL_MARGIN = 24;
 const CHIP_SIZE = 56;
 
-/** 缩放热区的厚度：边 6px，角 12px。 */
-const EDGE_SIZE = 6;
-const CORNER_SIZE = 12;
+/** 缩放热区的厚度：边 10px，角 16px。这是"抓得住"与"不占地方"之间的折中。 */
+const EDGE_SIZE = 10;
+const CORNER_SIZE = 16;
 
 /** 按住后移动超过这个距离才算拖动，否则当成一次点击。 */
 const DRAG_THRESHOLD = 4;
+
+/** 已开启自动打开的站点，设置图标用这个颜色：压在深色玻璃上对比度约 7:1。 */
+const ACTIVE_ICON_COLOR = '#8ab0ff';
+
+/** 授权界面嵌进来之后，等它自报高度的时间；等不到就当这一页不允许嵌扩展页面。 */
+const EDITOR_TIMEOUT_MS = 1000;
 
 /**
  * 浮窗的表面质感：深色毛玻璃。
@@ -98,7 +113,36 @@ const SURFACE = [
   'color: #f5f6f8',
 ].join(';');
 
-type PanelPosition = { left: number; top: number };
+/**
+ * 影子根里的一份样式表。
+ *
+ * 浮窗的样式几乎都在元素上，只有这几样写不进内联：伪元素（滚动条、文字选中）与悬停态。
+ * 页面自己的样式进不来影子根，所以这里不必考虑被覆盖。
+ */
+const PANEL_STYLE = [
+  // 内容区滚动条：系统那一条压在深色玻璃上很扎眼
+  '.panel-body { scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.22) transparent }',
+  '.panel-body::-webkit-scrollbar { width: 8px; height: 8px }',
+  '.panel-body::-webkit-scrollbar-track { background: transparent }',
+  '.panel-body::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.22); border-radius: 4px }',
+  '.panel-body::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.32) }',
+  // 选中色：默认那片蓝压在深色底上太跳
+  '::selection { background: rgba(90, 130, 255, 0.4) }',
+  // 缩放热区：平时透明，指针压上去才显出一条边，让人知道这里能拖
+  '.resize-edge { opacity: 0; transition: opacity 120ms }',
+  '.resize-edge:hover { opacity: 1; background: rgba(255, 255, 255, 0.14) }',
+].join('\n');
+
+/** 浮窗在视口里的落点。 */
+export type PanelPosition = { left: number; top: number };
+
+/**
+ * 浮窗这一次的样子：落在哪儿、是展开的面板还是收起的圆片。
+ *
+ * 两者一起记、一起读：它们共同回答"这个窗口现在什么样"，而尺寸不在此列——
+ * 尺寸每次回到默认（见开发记录）。
+ */
+export type PanelState = { position: PanelPosition | null; minimized: boolean };
 
 /**
  * 浮窗的位置与折叠状态。
@@ -112,13 +156,28 @@ let minimized = false;
 let panelWidth = DEFAULT_PANEL_WIDTH;
 let panelHeight: number | null = null;
 
-/** 本站在不在"进入时自动打开"的名单里：浮窗底部那一行据此显示。 */
+/** 本站在不在"进入时自动打开"的名单里：设置图标据此染色。 */
 let autoOpen = false;
 
+/**
+ * 设置区：展开时面板里嵌着扩展自己的授权界面。
+ *
+ * 它要等嵌入页面把高度报回来才知道该留多高；报不回来就说明这一页不允许嵌，
+ * 改用后台单独开出来的页面（见 createAutoOpenEditor）。
+ */
+let autoOpenEditor = false;
+let editorHeight: number | null = null;
+let editorFailed = false;
+let editorHandler: ((event: MessageEvent) => void) | null = null;
+let editorTimer: number | null = null;
+
 /** 上一次渲染的输入：折叠与展开时就地重画，不需要内容脚本再喊一次。 */
-let host: HTMLElement | null = null;
+let host: PanelTarget | null = null;
 let lastView: PanelView | null = null;
 let lastActions: PanelActions | null = null;
+
+/** 当前画出来的那个元素：视口变化时要拿它量尺寸，比从 DOM 里翻更直接。 */
+let rendered: HTMLElement | null = null;
 
 /** 拖动时与折叠状态一起记的"刚刚拖过"标记：拖动末尾的那次 click 要吃掉。 */
 let dragged = false;
@@ -126,13 +185,16 @@ let dragged = false;
 /** viewport 变化时的兜底观察者：窗口变小后浮窗不该停在屏幕外。 */
 let viewportObserver: ResizeObserver | null = null;
 
+/** 浮窗画在哪：宿主元素的影子根，或宿主元素本身。 */
+export type PanelTarget = Element | ShadowRoot;
+
 /**
  * 浮窗的渲染入口。
  *
  * 这是唯一与 UI 写法耦合的地方：将来浮窗变复杂、需要引入框架时，替换的是这一层，
  * 正文提取、消息通道与后端调用都不受影响。
  */
-export function renderPanel(target: HTMLElement, view: PanelView, actions: PanelActions): void {
+export function renderPanel(target: PanelTarget, view: PanelView, actions: PanelActions): void {
   host = target;
   lastView = view;
   lastActions = actions;
@@ -152,15 +214,60 @@ export function setAutoOpen(enabled: boolean): void {
   paint();
 }
 
+/**
+ * 套用记下来的样子。
+ *
+ * 在浮窗画出来之前套用，就不会看到跳动；越界由渲染时的夹取兜住。
+ * 用户在这次页面里已经动过手（位置被改过）就不覆盖他。
+ */
+export function restorePanelState(state: PanelState): void {
+  if (position !== null) {
+    return;
+  }
+  position = state.position;
+  minimized = state.minimized;
+  paint();
+}
+
+/** 把浮窗现在的样子交出去记下。只在一次操作结束时调，不必每次移动都写。 */
+function rememberState(): void {
+  lastActions?.rememberState({ position, minimized });
+}
+
 function paint(): void {
   if (host === null || lastView === null || lastActions === null) {
     return;
   }
 
+  releaseEditor();
   const element = minimized ? createChip(lastView) : createPanel(lastView, lastActions);
-  host.replaceChildren(element);
+  host.replaceChildren(...withStyleSheet(element));
+  rendered = element;
   place(element, minimized ? CHIP_SIZE : panelWidth);
   watchViewport();
+}
+
+/** 影子根里要先放一份样式表；面板与圆片都在它里面才吃得到伪元素那几条规则。 */
+function withStyleSheet(element: HTMLElement): Node[] {
+  if (!(host instanceof ShadowRoot)) {
+    return [element];
+  }
+
+  const style = document.createElement('style');
+  style.textContent = PANEL_STYLE;
+  return [style, element];
+}
+
+/** 释放上一轮授权区留下的监听与定时器：面板每次重画都会造一个新的。 */
+function releaseEditor(): void {
+  if (editorHandler !== null) {
+    window.removeEventListener('message', editorHandler);
+    editorHandler = null;
+  }
+  if (editorTimer !== null) {
+    window.clearTimeout(editorTimer);
+    editorTimer = null;
+  }
 }
 
 /** 位置先落在右上角，之后跟着用户拖到哪儿算哪儿。 */
@@ -188,13 +295,12 @@ function clampToViewport(point: PanelPosition, element: HTMLElement): PanelPosit
 function watchViewport(): void {
   viewportObserver?.disconnect();
   viewportObserver = new ResizeObserver(() => {
-    const element = host?.firstElementChild;
-    if (!(element instanceof HTMLElement) || position === null) {
+    if (rendered === null || position === null) {
       return;
     }
-    position = clampToViewport(position, element);
-    element.style.left = `${position.left}px`;
-    element.style.top = `${position.top}px`;
+    position = clampToViewport(position, rendered);
+    rendered.style.left = `${position.left}px`;
+    rendered.style.top = `${position.top}px`;
   });
   viewportObserver.observe(document.documentElement);
 }
@@ -204,7 +310,10 @@ function createPanel(view: PanelView, actions: PanelActions): HTMLElement {
   const body = createBody();
   const header = createHeader(actions);
   enableDrag(panel, header);
-  panel.append(header, body, createAutoOpenLine(actions));
+  panel.append(header, body);
+  if (autoOpenEditor) {
+    panel.append(createAutoOpenEditor(actions));
+  }
 
   switch (view.kind) {
     case 'loading':
@@ -215,7 +324,7 @@ function createPanel(view: PanelView, actions: PanelActions): HTMLElement {
       body.append(...createResult(view.analysis));
       if (view.expired) {
         body.append(
-          createLine(EXPIRED_NOTE, 'font-size: 13px; opacity: 0.75'),
+          createLine(EXPIRED_NOTE, 'font-size: 13px; opacity: 0.8'),
           createButton(REANALYZE_LABEL, actions.reanalyze),
         );
       }
@@ -239,7 +348,7 @@ function createPanel(view: PanelView, actions: PanelActions): HTMLElement {
           view.retried
             ? '评论可能要先登录才显示，你也可以自己往下滚一点再点一次。'
             : '这个页面要滚到评论区才会加载，要我去读一下吗？',
-          'font-size: 13px; opacity: 0.75',
+          'font-size: 13px; opacity: 0.8',
         ),
         createButton(view.retried ? '再试一次' : '好，去读评论区', actions.readDiscussion),
       );
@@ -252,9 +361,13 @@ function createPanel(view: PanelView, actions: PanelActions): HTMLElement {
 
 /** 折叠成一枚圆片：顺手把分数摆在上面，收起也能看到读数。 */
 function createChip(view: PanelView): HTMLElement {
+  const score = view.kind === 'result' ? String(view.analysis.flameIntensity) : null;
+
   const chip = document.createElement('button');
-  chip.textContent = view.kind === 'result' ? String(view.analysis.flameIntensity) : '空气';
+  chip.textContent = score ?? '空气';
   chip.title = '展开读空气';
+  // 圆片上的那个数字对读屏器来说没有来历，所以把动作和读数一起念出来
+  chip.setAttribute('aria-label', score === null ? '展开读空气' : `展开读空气，当前 ${score}`);
   chip.style.cssText = [
     SURFACE,
     // 与面板一样是浮在页面上的固定定位，少了它 left/top 不会生效
@@ -277,6 +390,7 @@ function createChip(view: PanelView): HTMLElement {
     }
     minimized = false;
     paint();
+    rememberState();
   });
   enableDrag(chip, chip);
   return chip;
@@ -339,27 +453,20 @@ const RESIZE_HANDLES: ReadonlyArray<{ edge: ResizeEdge; cursor: string; box: str
 /**
  * 四条边与四个角都能拖。
  *
- * 手柄平时透明，指针移到面板上才显形——它们不该破坏浮窗的外观。
+ * 手柄平时透明，指针压上去才显出一条边（样式在影子根的样式表里，见 PANEL_STYLE）——
+ * 它们不该破坏浮窗的外观，但也得让人知道这里能拖。
  * 拖哪条边，对面的那条边就不动：拖左边时右边缘固定，拖上边时底边固定，这样才像在拉窗口。
  */
 function createResizeHandles(panel: HTMLElement): HTMLElement[] {
   return RESIZE_HANDLES.map(({ edge, cursor, box }) => {
     const handle = document.createElement('div');
+    handle.className = 'resize-edge';
     handle.style.cssText = [
       'position: absolute',
       box,
-      'opacity: 0',
-      'transition: opacity 120ms',
       `cursor: ${cursor}`,
       'touch-action: none',
     ].join(';');
-
-    panel.addEventListener('pointerenter', () => {
-      handle.style.opacity = '1';
-    });
-    panel.addEventListener('pointerleave', () => {
-      handle.style.opacity = '0';
-    });
 
     enableResize(panel, handle, edge);
     return handle;
@@ -370,12 +477,13 @@ function createResizeHandles(panel: HTMLElement): HTMLElement[] {
  * 开始一次指针拖动。
  *
  * 只接左键，把指针锁在这个热区上，松手或取消时把监听摘干净。
- * 拖动浮窗与拖动缩放热区共用这一段：两者除了移动时算什么，其余完全一样。
+ * 拖动浮窗与拖动缩放热区共用这一段：两者除了移动时算什么、以及结束时要不要记落点，其余一样。
  */
 function beginPointerDrag(
   handle: HTMLElement,
   event: PointerEvent,
   onMove: (moveEvent: PointerEvent) => void,
+  onEnd: () => void,
 ): void {
   if (event.button !== 0) {
     return;
@@ -388,6 +496,7 @@ function beginPointerDrag(
     handle.removeEventListener('pointermove', onMove);
     handle.removeEventListener('pointerup', finish);
     handle.removeEventListener('pointercancel', finish);
+    onEnd();
   };
 
   handle.addEventListener('pointermove', onMove);
@@ -432,7 +541,7 @@ function enableResize(panel: HTMLElement, handle: HTMLElement, edge: ResizeEdge)
 
       position = { left, top };
       applySize(panel);
-    });
+    }, rememberState);
   });
 }
 
@@ -491,33 +600,50 @@ function enableDrag(element: HTMLElement, handle: HTMLElement): void {
       position = clampToViewport({ left: start.left + dx, top: start.top + dy }, element);
       element.style.left = `${position.left}px`;
       element.style.top = `${position.top}px`;
-    });
+    }, rememberState);
   });
 }
 
 function createResult(analysis: AtmosphereAnalysis): HTMLElement[] {
-  const lines: HTMLElement[] = [
-    createLine(
-      `${analysis.flameIntensity} · ${LEVEL_LABELS[analysis.level]}`,
-      'font-size: 16px; font-weight: 600',
-    ),
-    createLine(analysis.summary, ''),
-  ];
+  const lines: HTMLElement[] = [createScore(analysis), createLine(analysis.summary, '')];
 
   if (analysis.evidence.length > 0) {
     lines.push(createEvidence(analysis.evidence));
   }
   if (analysis.confidence < LOW_CONFIDENCE) {
-    lines.push(createLine('这里的内容不太好判断', 'font-size: 13px; opacity: 0.75'));
+    lines.push(createLine('这里的内容不太好判断', 'font-size: 13px; opacity: 0.8'));
   }
 
   return lines;
 }
 
+/**
+ * 分数：数字占主位，等级降成它旁边的次要标签。
+ *
+ * 之前两者挤在同一行、字号也只差两级，扫一眼分不出哪个才是结论。
+ * 窄到放不下时让等级换行，而不是被裁掉。
+ */
+function createScore(analysis: AtmosphereAnalysis): HTMLElement {
+  const line = document.createElement('div');
+  line.style.cssText =
+    'display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin-bottom: 8px';
+
+  const score = document.createElement('span');
+  score.textContent = String(analysis.flameIntensity);
+  score.style.cssText = 'font-size: 26px; font-weight: 600; line-height: 1.1';
+
+  const level = document.createElement('span');
+  level.textContent = LEVEL_LABELS[analysis.level];
+  level.style.cssText = 'font-size: 13px; opacity: 0.85';
+
+  line.append(score, level);
+  return line;
+}
+
 /** 依据做成列表：三条以内的短句比一段话更容易扫过去。 */
 function createEvidence(evidence: string[]): HTMLElement {
   const list = document.createElement('ul');
-  list.style.cssText = 'margin: 0 0 6px; padding-left: 18px; font-size: 13px; opacity: 0.85';
+  list.style.cssText = 'margin: 0 0 6px; padding-left: 18px; font-size: 13px; opacity: 0.8';
 
   for (const item of evidence.slice(0, MAX_EVIDENCE)) {
     const entry = document.createElement('li');
@@ -537,6 +663,8 @@ function createContainer(): HTMLElement {
     // 纵向排布：标题栏固定，内容区自己滚
     'display: flex',
     'flex-direction: column',
+    // 窗口被压到极小时，子元素不该溢出圆角边框；内容区自己会滚，不需要它来撑开
+    'overflow: hidden',
     `width: ${panelWidth}px`,
     panelHeight === null ? '' : `height: ${panelHeight}px`,
     'box-sizing: border-box',
@@ -558,6 +686,8 @@ function createContainer(): HTMLElement {
  */
 function createBody(): HTMLElement {
   const body = document.createElement('div');
+  // 滚动条样式写在影子根的样式表里，见 PANEL_STYLE
+  body.className = 'panel-body';
   body.style.cssText = 'flex: 1 1 auto; min-height: 0; overflow: auto';
   return body;
 }
@@ -568,7 +698,9 @@ function createHeader(actions: PanelActions): HTMLElement {
     'display: flex',
     'align-items: center',
     'justify-content: space-between',
-    'margin-bottom: 6px',
+    // 标题栏下比别处多给一点：正文第一行是 26px 的数字，方块大、行高又紧，
+    // 同样是 12px，大字看着就是更贴边
+    'margin-bottom: 16px',
     // 不用 cursor: move，它会把指针换成十字箭头；这里保持普通箭头
     'cursor: default',
     'user-select: none',
@@ -577,58 +709,123 @@ function createHeader(actions: PanelActions): HTMLElement {
 
   const title = document.createElement('span');
   title.textContent = '读空气';
-  // 窗口被压得很细时先牺牲标题：它只是名字，两个按钮是真的要能点到
+  // 窗口被压得很细时先牺牲标题：它只是名字，几个按钮是真的要能点到
   title.style.cssText =
     'font-weight: 600; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis';
+
+  const refresh = createIconButton('refresh', '重新分析', actions.reanalyze);
+  // 图标兼作状态：本站已开启自动打开时染色，设置区展开时带一层底色
+  const settings = createIconButton('settings', '本站设置', () => {
+    autoOpenEditor = !autoOpenEditor;
+    paint();
+  });
+  settings.style.background = autoOpenEditor ? 'rgba(255, 255, 255, 0.14)' : 'transparent';
+  settings.style.borderRadius = '4px';
+  if (autoOpen) {
+    settings.style.color = ACTIVE_ICON_COLOR;
+  }
 
   const minimize = createIconButton('minimize', '收起', () => {
     minimized = true;
     paint();
+    rememberState();
   });
   const close = createIconButton('close', '关闭', () => {
     // 关闭后下次再点图标应当是展开的面板，所以顺带把折叠状态复位
     minimized = false;
+    rememberState();
     actions.close();
   });
 
   const controls = document.createElement('span');
   controls.style.cssText = 'display: flex; gap: 2px; flex: 0 0 auto';
-  controls.append(minimize, close);
+  controls.append(refresh, settings, minimize, close);
 
   header.append(title, controls);
   return header;
 }
 
 /**
- * 浮窗底部的一行：本站的自动打开开关。
+ * 设置区：把扩展自己的授权界面嵌进来。
  *
- * 这里调不了 chrome.permissions——内容脚本没有这个 API——所以只把意图交出去，
- * 请求授权的是读空气自己的页面（Chrome 要求在用户手势里请求）。
+ * 为什么不自己画这块界面：请求 host 权限必须在用户手势里发起，而内容脚本没有
+ * chrome.permissions 这个 API，只有扩展页面调得动。嵌入页面渲染完会把自身高度报过来，
+ * 面板据此留出位置；报不回来就说明这一页不允许嵌扩展页面，退回到独立窗口。
  */
-function createAutoOpenLine(actions: PanelActions): HTMLElement {
-  const button = document.createElement('button');
-  button.textContent = autoOpen ? '已在本站自动打开' : '进入本站时自动打开';
-  button.title = autoOpen ? '点击可关闭' : '进入这个网站的页面时自动打开浮窗';
-  button.style.cssText = [
+function createAutoOpenEditor(actions: PanelActions): HTMLElement {
+  const area = document.createElement('div');
+  // 与正文分开：一条细线加两侧留白。只靠拉开距离，在窄浮窗里很难看出这是另一块。
+  // 线上面算上正文末行自带的 6px，两侧正好各 12px
+  area.style.cssText = [
     'margin-top: 6px',
-    'padding: 0',
-    'border: none',
-    'background: transparent',
-    'color: inherit',
-    'font: 13px/1.6 system-ui, sans-serif',
-    'text-align: left',
-    'cursor: pointer',
-    // 压在毛玻璃上时底色会跟着页面走，所以透明度不能压太低：0.6 在亮页面上会掉到 4 左右
-    `opacity: ${autoOpen ? 0.8 : 0.9}`,
+    'padding-top: 12px',
+    'border-top: 1px solid rgba(255, 255, 255, 0.1)',
   ].join(';');
 
-  button.addEventListener('click', actions.enableAutoOpen);
-  return button;
+  if (editorFailed) {
+    // 只说这份设置没加载出来：不猜原因，也不把责任推给站点——用户更信站点，那反而像我们被拒了
+    area.append(
+      createLine('设置区加载失败', 'font-size: 13px; opacity: 0.8'),
+      createButton('在独立窗口里设置', actions.openAutoOpenPage),
+    );
+    return area;
+  }
+
+  const frame = document.createElement('iframe');
+  frame.src = actions.autoOpenFrameUrl;
+  frame.style.cssText = [
+    'display: block',
+    'width: 100%',
+    `height: ${editorHeight ?? 0}px`,
+    'border: none',
+    // 面板自己有底色，嵌入页面透明才不会切出一块
+    'background: transparent',
+  ].join(';');
+
+  // 高度由嵌入页面自报：面板算不出跨源文档的高度。
+  // 只认这一个来源：来源对、窗口对、形状对，三样都满足才算数
+  const expectedOrigin = new URL(frame.src).origin;
+  const handler = (event: MessageEvent): void => {
+    if (
+      event.origin !== expectedOrigin ||
+      event.source !== frame.contentWindow ||
+      !isEditorHeight(event.data)
+    ) {
+      return;
+    }
+    editorHeight = event.data.height;
+    editorFailed = false;
+    if (editorTimer !== null) {
+      window.clearTimeout(editorTimer);
+      editorTimer = null;
+    }
+    frame.style.height = `${editorHeight}px`;
+  };
+  editorHandler = handler;
+  window.addEventListener('message', handler);
+
+  editorTimer = window.setTimeout(() => {
+    editorTimer = null;
+    editorFailed = true;
+    paint();
+  }, EDITOR_TIMEOUT_MS);
+
+  area.append(frame);
+  return area;
+}
+
+function isEditorHeight(value: unknown): value is { type: 'autoOpenHeight'; height: number } {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const candidate = value as { type?: unknown; height?: unknown };
+  return candidate.type === 'autoOpenHeight' && typeof candidate.height === 'number';
 }
 
 /** 标题栏上的小按钮：不参与拖动，也不让事件冒泡到页面。 */
 function createIconButton(
-  kind: 'minimize' | 'close',
+  kind: IconKind,
   title: string,
   onClick: () => void,
 ): HTMLElement {
@@ -665,7 +862,30 @@ function createIconButton(
  * "—"和"×"这类字符的宽度与笔画粗细天生不同，只调字号凑不齐；
  * 同一块画布、同一个线宽画出来的才真的一样大。
  */
-function createIcon(kind: 'minimize' | 'close'): SVGElement {
+type IconKind = 'minimize' | 'close' | 'refresh' | 'settings';
+
+const ICON_SHAPES: Record<IconKind, { lines?: number[][]; paths?: string[] }> = {
+  minimize: { lines: [[3, 8, 13, 8]] },
+  close: {
+    lines: [
+      [4, 4, 12, 12],
+      [12, 4, 4, 12],
+    ],
+  },
+  // 一段缺口圆弧加一个箭头，读作"再算一遍"：圆心 (8,8)、半径 5，从顶端顺时针走到左下
+  refresh: { paths: ['M 8 3 A 5 5 0 1 1 3.3 9.7', 'M 5.9 1.7 L 8 3 L 5.9 4.3'] },
+  // 两根滑杆：16px 下画齿轮会糊成一团，滑杆四条线段就画得准，也更像"一小块设置"
+  settings: {
+    lines: [
+      [2, 5.5, 14, 5.5],
+      [10, 3.5, 10, 7.5],
+      [2, 10.5, 14, 10.5],
+      [6, 8.5, 6, 12.5],
+    ],
+  },
+};
+
+function createIcon(kind: IconKind): SVGElement {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 16 16');
   svg.setAttribute('width', '16');
@@ -674,16 +894,9 @@ function createIcon(kind: 'minimize' | 'close'): SVGElement {
   svg.setAttribute('stroke', 'currentColor');
   svg.setAttribute('stroke-width', '1.6');
   svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
 
-  const segments: ReadonlyArray<readonly [number, number, number, number]> =
-    kind === 'minimize'
-      ? [[3, 8, 13, 8]]
-      : [
-          [4, 4, 12, 12],
-          [12, 4, 4, 12],
-        ];
-
-  for (const [x1, y1, x2, y2] of segments) {
+  for (const [x1, y1, x2, y2] of ICON_SHAPES[kind].lines ?? []) {
     const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
     line.setAttribute('x1', String(x1));
     line.setAttribute('y1', String(y1));
@@ -691,6 +904,13 @@ function createIcon(kind: 'minimize' | 'close'): SVGElement {
     line.setAttribute('y2', String(y2));
     svg.append(line);
   }
+
+  for (const definition of ICON_SHAPES[kind].paths ?? []) {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', definition);
+    svg.append(path);
+  }
+
   return svg;
 }
 
@@ -706,6 +926,8 @@ function createButton(label: string, onClick: () => void): HTMLElement {
   button.textContent = label;
   button.style.cssText = [
     'margin-top: 4px',
+    // 与文字行一样留一段下边距：否则以按钮结尾的视图里，正文与下面那块区域会少 6px
+    'margin-bottom: 6px',
     'padding: 6px 10px',
     'border: none',
     'border-radius: 6px',

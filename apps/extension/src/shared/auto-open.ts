@@ -2,7 +2,7 @@
  * "进入网站时自动打开"的授权名单。
  *
  * 名单单独记在 storage 里，而不是每次去读已授权的 host 权限：内容脚本拿不到
- * chrome.permissions，却要据此决定浮窗底部那一行怎么显示；storage 的变更通知
+ * chrome.permissions，却要据此决定浮窗上那个设置图标的状态；storage 的变更通知
  * 也正好当"授权变了"的信号用。
  */
 
@@ -46,8 +46,15 @@ export async function addAutoOpenOrigin(origin: string): Promise<void> {
   await chrome.storage.local.set({ [STORAGE_KEY]: [...origins, origin] });
 }
 
-export async function removeAutoOpenOrigin(origin: string): Promise<void> {
+/**
+ * 关掉一个站点的自动打开：名单里去掉，访问权限也还回去。
+ *
+ * 开启做不到这样合并——请求权限必须在用户手势里发起，只能由页面自己调，
+ * 所以"开启"是页面分两步写的，"关闭"没有这个限制，就收在这里。
+ */
+export async function disableAutoOpen(origin: string): Promise<void> {
   const origins = await listAutoOpenOrigins();
+  await chrome.permissions.remove({ origins: [permissionPatternOf(origin)] });
   await chrome.storage.local.set({
     [STORAGE_KEY]: origins.filter((item) => item !== origin),
   });

@@ -5,7 +5,8 @@ import {
   loadDiscussionQuietly,
   takeSample,
 } from './extract';
-import { type PanelActions, renderPanel, setAutoOpen } from './panel';
+import { type PanelActions, type PanelTarget, renderPanel, restorePanelState, setAutoOpen } from './panel';
+import { loadPanelState, rememberPanelState } from './panel-state';
 import {
   type DiscussionSnapshot,
   hasContentChanged,
@@ -58,14 +59,16 @@ function start(): void {
   }
 
   const host = document.getElementById(HOST_ID) ?? createHost();
+  // 浮窗挂在影子根里：站点自己的样式再也进不来，滚动条与选中色这类伪元素也才写得进去
+  const root = host.shadowRoot ?? host.attachShadow({ mode: 'open' });
 
   const listener = (message: ExtensionMessage): void => {
     if (message.type === SHOW_PANEL.type) {
-      void runAnalysis(host);
+      void runAnalysis(root);
     }
   };
 
-  // 授权变了就重画：浮窗底部那一行不该停在上一次的状态上
+  // 授权变了就重画：设置图标上的状态不该停在旧值上
   const onStorageChanged = (): void => {
     void syncAutoOpen();
   };
@@ -74,6 +77,19 @@ function start(): void {
   chrome.runtime.onMessage.addListener(listener);
   chrome.storage.onChanged.addListener(onStorageChanged);
   void syncAutoOpen();
+  void restorePanelStateFromSession();
+}
+
+/**
+ * 把上次留下的浮窗样子读回来。
+ *
+ * 只记在本次浏览器会话里（见 panel-state），所以读不到就是回到默认：右上角、展开的面板。
+ */
+async function restorePanelStateFromSession(): Promise<void> {
+  const state = await loadPanelState();
+  if (state !== null) {
+    restorePanelState(state);
+  }
 }
 
 /** 把本站的授权状态读给渲染层。非 http(s) 页面没有可授权的站点，直接当作未开启。 */
@@ -93,7 +109,7 @@ function createHost(): HTMLElement {
  * 一次分析：先用页面上现成的内容；读不到就无感加载评论区；再读不到才把兜底按钮交给用户。
  * 无感加载不移动页面，用户在正常路径上只会看到加载提示与结果。
  */
-async function runAnalysis(host: HTMLElement): Promise<void> {
+async function runAnalysis(host: PanelTarget): Promise<void> {
   stopWatching();
 
   const current = extractDiscussion();
@@ -112,7 +128,7 @@ async function runAnalysis(host: HTMLElement): Promise<void> {
 }
 
 /** 兜底路径：用户点了按钮，这次位移是他换来的。 */
-async function readByScrolling(host: HTMLElement): Promise<void> {
+async function readByScrolling(host: PanelTarget): Promise<void> {
   renderPanel(host, { kind: 'loading', phase: 'readingComments' }, createActions(host));
 
   const content = await loadDiscussionByScrolling();
@@ -123,7 +139,7 @@ async function readByScrolling(host: HTMLElement): Promise<void> {
   await analyzeAndShow(host, content);
 }
 
-async function analyzeAndShow(host: HTMLElement, content: DiscussionReady): Promise<void> {
+async function analyzeAndShow(host: PanelTarget, content: DiscussionReady): Promise<void> {
   renderPanel(host, { kind: 'loading', phase: 'analyzing' }, createActions(host));
 
   const sample = takeSample(content.text);
@@ -150,7 +166,7 @@ async function analyzeAndShow(host: HTMLElement, content: DiscussionReady): Prom
  * 基线取的是刚送去分析的那一段，而不是此刻重读页面：两者之间页面若又加载了内容，
  * 那些内容并没有被这次分析覆盖，不该被当成已分析。
  */
-function watchForChanges(host: HTMLElement, baseline: DiscussionSnapshot): void {
+function watchForChanges(host: PanelTarget, baseline: DiscussionSnapshot): void {
   stopWatching();
   watchTimer = window.setInterval(() => {
     checkChanges(host, baseline);
@@ -165,7 +181,7 @@ function stopWatching(): void {
 }
 
 /** 页面不可见时跳过：用户在别的标签页上，没有必要读这个页面。 */
-function checkChanges(host: HTMLElement, baseline: DiscussionSnapshot): void {
+function checkChanges(host: PanelTarget, baseline: DiscussionSnapshot): void {
   if (document.visibilityState !== 'visible') {
     return;
   }
@@ -206,7 +222,7 @@ async function requestAnalysis(text: string): Promise<AnalysisOutcome> {
   }
 }
 
-function createActions(host: HTMLElement): PanelActions {
+function createActions(host: PanelTarget): PanelActions {
   return {
     readDiscussion: () => {
       void readByScrolling(host);
@@ -220,13 +236,27 @@ function createActions(host: HTMLElement): PanelActions {
       lastAnalysis = null;
       host.replaceChildren();
     },
-    enableAutoOpen: () => {
+    autoOpenFrameUrl: autoOpenFrameUrl(),
+    openAutoOpenPage: () => {
       void requestAutoOpen();
+    },
+    rememberState: (state) => {
+      void rememberPanelState(state);
     },
   };
 }
 
-/** 授权页面必须在用户手势里请求权限，这里只请后台把它开出来。 */
+/**
+ * 授权界面（扩展自己的页面）的地址，嵌在浮窗里用。
+ *
+ * 嵌入页面靠地址里的站点标识知道自己该管哪个站，所以这里必须带上它。
+ */
+function autoOpenFrameUrl(): string {
+  const origin = originOf(location.href) ?? location.origin;
+  return chrome.runtime.getURL(`options.html?embed=1&origin=${encodeURIComponent(origin)}`);
+}
+
+/** 兜底路径：面板里嵌不进来时，请后台把授权页单独开出来。 */
 async function requestAutoOpen(): Promise<void> {
   const origin = originOf(location.href);
   if (origin === null) {

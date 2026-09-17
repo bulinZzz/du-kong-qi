@@ -1,26 +1,34 @@
 import {
   addAutoOpenOrigin,
+  disableAutoOpen,
   isAutoOpenEnabled,
   listAutoOpenOrigins,
   permissionPatternOf,
-  removeAutoOpenOrigin,
 } from '../shared/auto-open';
 
 /**
- * 授权页面。
+ * 设置页面。
  *
  * 请求 host 权限必须在用户手势里进行，而内容脚本没有 chrome.permissions，
- * 所以"按网站授权"这件事只能落在扩展自己的页面上。两种进入方式：
- * 从浮窗底部那一行进来时带着站点标识，直接打开设置页时列出已开启的网站。
+ * 所以"按网站授权"这件事只能落在扩展自己的页面上。三种进入方式：
+ * 嵌在浮窗里（带 embed=1，去掉标题与底色，并把自身高度报回去）、
+ * 后台开出的独立窗口（带站点标识，面板里嵌不进来时的兜底）、
+ * 直接打开设置页（不带站点标识，列出已开启的网站）。
+ *
+ * 它不自己关：开关都在这一页上，随手关掉会让用户以为事情没办完。
  */
+const params = new URLSearchParams(location.search);
 
-/** 从浮窗进来时带的站点标识；为空表示用户自己打开了设置页。 */
-const site = new URLSearchParams(location.search).get('origin');
+/** 要管哪个站；为空表示用户自己打开了设置页。 */
+const site = params.get('origin');
+
+/** 嵌在浮窗里的模式。 */
+const embedded = params.get('embed') === '1';
 
 /** 上一次操作的反馈。显示过一次就清掉，免得下次重画又冒出来。 */
 let notice: string | null = null;
 
-/** 重画当前视图：从浮窗进来的站点视图，或用户自己打开时的已开启列表。 */
+/** 重画当前视图：站点视图，或用户自己打开时的已开启列表。 */
 function render(): void {
   if (site === null) {
     void renderSiteList();
@@ -29,42 +37,74 @@ function render(): void {
   void renderSite(site);
 }
 
+/** 这一段设置管什么。标签要说清被打开的是什么，也要限定范围——它只管当前这个网站。 */
+const SETTING_LABEL = '进入当前网站时自动打开读空气';
+
 async function renderSite(origin: string): Promise<void> {
   const enabled = await isAutoOpenEnabled(origin);
+  const button = enabled
+    ? toggle(true, SETTING_LABEL, () => void revoke(origin))
+    : toggle(false, SETTING_LABEL, () => requestPermission(origin));
 
   const card = document.createElement('div');
-  card.append(heading('读空气'), paragraph(`进入 ${origin} 的页面时自动打开浮窗。`));
 
-  const hint = enabled
-    ? '不想让它自动打开时，关掉即可。'
-    : '开启后，进入这个网站的页面会自动读一次空气。';
-  const button = enabled
-    ? action('关闭', 'plain', () => void revoke(origin))
-    : action('开启', '', () => requestPermission(origin));
+  // 嵌在浮窗里时只留一行：标签说这段设置管什么，开关说现在是开还是关
+  if (embedded) {
+    card.append(row(paragraph(SETTING_LABEL, 'muted'), button));
+  } else {
+    // 独立窗口的标题栏已经叫"设置"，里面就说到具体是哪一项；站点跟开关同一行
+    card.append(heading(SETTING_LABEL), row(paragraph(origin, 'muted'), button));
+  }
 
-  card.append(row(hint, button));
-
-  app().replaceChildren(card);
-  appendNotice(card);
+  paint(card);
 }
 
 async function renderSiteList(): Promise<void> {
   const origins = await listAutoOpenOrigins();
 
   const card = document.createElement('div');
-  card.append(heading('读空气'));
+  card.append(heading('设置'));
 
   if (origins.length === 0) {
     card.append(
       paragraph('还没有开启任何网站。'),
-      paragraph('在网站页面上点浮窗底部的「进入本站时自动打开」即可开启。', 'muted'),
+      paragraph('在网站页面上点浮窗标题栏的设置图标即可开启。', 'muted'),
     );
   } else {
-    card.append(paragraph('进入这些网站时会自动打开浮窗：', 'muted'), createSiteList(origins));
+    card.append(paragraph('进入这些网站时会自动打开读空气：', 'muted'), createSiteList(origins));
   }
 
+  paint(card);
+}
+
+/** 落一次 DOM 并收尾：提示，以及嵌在浮窗里时把高度报回去。 */
+function paint(card: HTMLElement): void {
   app().replaceChildren(card);
   appendNotice(card);
+  reportHeight();
+}
+
+/**
+ * 把自身高度报给浮窗。
+ *
+ * 跨源文档之间量不到对方的高度，只能自己报；浮窗据此决定给这块地方留多高。
+ * 报给谁要指名道姓：用父页面的来源当目标，拿不到就不发——浮窗那边会走兜底提示，
+ * 总好过发给一个不确定的对象。
+ */
+function reportHeight(): void {
+  if (!embedded || window.parent === window) {
+    return;
+  }
+
+  const parentOrigin = location.ancestorOrigins[0];
+  if (parentOrigin === undefined) {
+    return;
+  }
+
+  window.parent.postMessage(
+    { type: 'autoOpenHeight', height: Math.ceil(document.body.getBoundingClientRect().height) },
+    parentOrigin,
+  );
 }
 
 /**
@@ -80,27 +120,17 @@ function requestPermission(origin: string): void {
 
 async function grant(origin: string): Promise<void> {
   await addAutoOpenOrigin(origin);
-  // 这一页是从浮窗那一行拐出来的，办完就回去，不把用户留在设置页
-  await closeSelf();
+  render();
 }
 
 async function revoke(origin: string): Promise<void> {
-  await removeAutoOpenOrigin(origin);
-  await chrome.permissions.remove({ origins: [permissionPatternOf(origin)] });
+  await disableAutoOpen(origin);
   render();
 }
 
 function refuse(): void {
   notice = '没有授权，读空气不会自动打开。';
   render();
-}
-
-/** 关掉当前标签页。授权页是扩展自己开出来的，用户不该再手动收拾它。 */
-async function closeSelf(): Promise<void> {
-  const tab = await chrome.tabs.getCurrent();
-  if (tab?.id !== undefined) {
-    await chrome.tabs.remove(tab.id);
-  }
 }
 
 function createSiteList(origins: string[]): HTMLElement {
@@ -141,10 +171,11 @@ function paragraph(text: string, className = ''): HTMLElement {
   return element;
 }
 
-function row(hint: string, button: HTMLButtonElement): HTMLElement {
+/** 一行：左边是这段设置的说明，右边是它的动作。只有一个子元素时它自然靠左。 */
+function row(...children: HTMLElement[]): HTMLElement {
   const element = document.createElement('div');
   element.className = 'row';
-  element.append(paragraph(hint, 'muted'), button);
+  element.append(...children);
   return element;
 }
 
@@ -156,12 +187,37 @@ function action(label: string, className: string, onClick: () => void): HTMLButt
   return button;
 }
 
+/**
+ * 开关。
+ *
+ * 状态是一眼看得见的事（蓝开灰关），所以不必在"开启/关闭"这类动词上做反推；
+ * 标签也可以安心写"这段设置是什么"，不必和按钮的动词打架。
+ */
+function toggle(checked: boolean, label: string, onToggle: () => void): HTMLButtonElement {
+  const button = document.createElement('button');
+  button.className = 'switch';
+  button.setAttribute('role', 'switch');
+  button.setAttribute('aria-checked', String(checked));
+  button.setAttribute('aria-label', label);
+
+  const knob = document.createElement('span');
+  knob.className = 'knob';
+  button.append(knob);
+
+  button.addEventListener('click', onToggle);
+  return button;
+}
+
 function appendNotice(card: HTMLElement): void {
   if (notice === null) {
     return;
   }
   card.append(paragraph(notice, 'notice'));
   notice = null;
+}
+
+if (embedded) {
+  document.body.classList.add('embed');
 }
 
 render();

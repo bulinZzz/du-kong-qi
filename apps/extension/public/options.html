@@ -2,37 +2,48 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
-    <title>读空气 · 设置</title>
+    <title>设置</title>
     <style>
+      /*
+       * 与浮窗同一套表面：同一个渐变、同一个字体层级、同一个强调色。
+       * 浮窗那层是半透明加背景模糊，这里没有"背后"可透，所以用同一色相的实色。
+       * 每一组配色都按 4.5:1 的对比度选过。
+       */
       body {
         margin: 0;
-        padding: 32px 24px;
-        background: #f6f7f9;
-        color: #1d2129;
-        font: 14px/1.7 system-ui, sans-serif;
+        padding: 18px 20px;
+        background: linear-gradient(160deg, #282e3d, #161a23);
+        color: #f5f6f8;
+        font: 14px/1.6 system-ui, sans-serif;
       }
 
-      .card {
+      #app {
         max-width: 520px;
-        margin: 0 auto;
-        padding: 22px 24px;
-        border: 1px solid #e3e5e8;
-        border-radius: 12px;
-        background: #fff;
+      }
+
+      /* 同一个页面既是 460 宽的授权弹窗，也是完整的设置页：窄时贴边，宽时留白并居中 */
+      @media (min-width: 600px) {
+        body {
+          padding: 32px 24px;
+        }
+
+        #app {
+          margin: 0 auto;
+        }
       }
 
       h1 {
-        margin: 0 0 10px;
-        font-size: 17px;
+        margin: 0 0 8px;
+        font-size: 15px;
+        font-weight: 600;
       }
 
       p {
         margin: 0;
       }
 
-      /* 这里的每一组颜色都按 4.5:1 的对比度选过：正文 14px 达不到要重挑，不能靠感觉 */
       .muted {
-        color: #6b6f76;
+        color: #b9bcc4;
         font-size: 13px;
       }
 
@@ -41,11 +52,11 @@
         align-items: center;
         justify-content: space-between;
         gap: 12px;
-        margin-top: 14px;
+        margin-top: 16px;
       }
 
       .sites {
-        margin: 14px 0 0;
+        margin: 12px 0 0;
         padding: 0;
         list-style: none;
       }
@@ -55,13 +66,13 @@
         align-items: center;
         justify-content: space-between;
         gap: 12px;
-        padding: 7px 0;
-        border-top: 1px solid #f0f1f3;
+        padding: 6px 0;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
       }
 
       .notice {
         margin-top: 12px;
-        color: #9a5b00;
+        color: #ffc48a;
       }
 
       button {
@@ -74,14 +85,71 @@
         cursor: pointer;
       }
 
+      /* 次按钮用不透明底色：半透明底衬着渐变，分析器算不准，看着也随位置变 */
       button.plain {
-        background: #eef0f3;
-        color: #1d2129;
+        background: #3d4048;
+        color: #f5f6f8;
+      }
+
+      /* 开关：蓝开灰关，状态自己说话，不靠动词。轨道也用不透明底，免得颜色随渐变位置变 */
+      .switch {
+        position: relative;
+        flex: 0 0 auto;
+        width: 34px;
+        height: 18px;
+        padding: 0;
+        border: none;
+        border-radius: 9px;
+        background: #4a4d54;
+        cursor: pointer;
+        transition: background 120ms;
+      }
+
+      .switch[aria-checked='true'] {
+        background: #3a67e0;
+      }
+
+      .switch .knob {
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: #fff;
+        transition: left 120ms;
+      }
+
+      .switch[aria-checked='true'] .knob {
+        left: 18px;
+      }
+
+      /*
+       * 嵌在浮窗里的模式（embed=1）：只留一行"标签 + 动作"，去掉自己的底色、留白与标题，
+       * 让浮窗的玻璃面透上来。宽度交给浮窗：这里不再限宽、不再居中，一律和正文一样靠左。
+       */
+      body.embed {
+        padding: 0;
+        background: transparent;
+      }
+
+      body.embed h1 {
+        display: none;
+      }
+
+      body.embed #app {
+        max-width: none;
+        margin: 0;
+      }
+
+      body.embed .row {
+        margin-top: 0;
+        justify-content: flex-start;
       }
     </style>
   </head>
   <body>
-    <main class="card" id="app"></main>
+    <main id="app"></main>
     <script type="module" src="options.js"></script>
   </body>
 </html>
