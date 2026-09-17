@@ -77,11 +77,32 @@ async function renderSiteList(): Promise<void> {
   paint(card);
 }
 
-/** 落一次 DOM 并收尾：提示，以及嵌在浮窗里时把高度报回去。 */
+/** 落一次 DOM 并收尾：隐私说明，提示，以及嵌在浮窗里时把高度报回去。 */
 function paint(card: HTMLElement): void {
+  card.append(privacy());
   app().replaceChildren(card);
   appendNotice(card);
   reportHeight();
+}
+
+/**
+ * 隐私说明。
+ *
+ * 讨论内容会离开浏览器，这件事得在扩展里说清楚，不能只写在商店页面里。
+ * 三件事按用户会问的顺序说：发什么、服务器留不留、以及不想要时怎么办。
+ */
+function privacy(): HTMLElement {
+  const block = document.createElement('div');
+  block.className = 'privacy';
+  block.append(
+    subheading('隐私'),
+    paragraph(
+      '分析时会把当前页面的讨论文字（开头一段）发到读空气的服务器，由它交给模型服务判断；服务器不保存这些文字。',
+      'muted',
+    ),
+    paragraph('你授权过的网站上，打开页面会自动分析一次；结论留在浏览器本地，内容没变就不再请求。', 'muted'),
+  );
+  return block;
 }
 
 /**
@@ -160,6 +181,12 @@ function app(): HTMLElement {
 
 function heading(text: string): HTMLElement {
   const element = document.createElement('h1');
+  element.textContent = text;
+  return element;
+}
+
+function subheading(text: string): HTMLElement {
+  const element = document.createElement('h2');
   element.textContent = text;
   return element;
 }

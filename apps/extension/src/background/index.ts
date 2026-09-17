@@ -1,6 +1,7 @@
 import { isAutoOpenEnabled, originOf } from '../shared/auto-open';
 import { isAnalyzeMessage, isRequestAutoOpenMessage, SHOW_PANEL } from '../shared/messages';
 import { type AnalysisOutcome, isAtmosphereAnalysis } from '../shared/protocol';
+import { cacheAnalysis, readCachedAnalysis } from './analysis-cache';
 
 /** 后端地址。开发期指向本机，部署确定后再改。 */
 const BACKEND_BASE_URL = 'http://localhost:8080';
@@ -136,8 +137,22 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
  * 请求后端做一次空气分析。
  *
  * 失败在这里就分成几类，内容脚本只负责按类别说人话。
+ * 同一段内容在一次浏览器会话里只算一次：先查缓存，算完记下。
  */
 async function analyze(text: string): Promise<AnalysisOutcome> {
+  const cached = await readCachedAnalysis(text);
+  if (cached !== null) {
+    return cached;
+  }
+
+  const outcome = await requestAnalysis(text);
+  // 不等待写入：结论已经拿到了，记缓存不该让用户多等
+  void cacheAnalysis(text, outcome);
+  return outcome;
+}
+
+/** 真正发出请求的那一半。 */
+async function requestAnalysis(text: string): Promise<AnalysisOutcome> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
