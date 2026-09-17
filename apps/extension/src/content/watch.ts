@@ -19,19 +19,31 @@ const CHANGED_RATIO = 0.2;
 const CHANGED_LINES = 10;
 
 /**
+ * 只比够长的行。
+ *
+ * 相对时间（"3分钟前"→"4分钟前"）与点赞数这类短行每次刷新都可能变，攒几条就够凑到阈值，
+ * 于是讨论没变也提示重算。短回复（"同感"）也会被这句滤掉，但它们本来就不构成"变化大"。
+ */
+const MIN_MEANINGFUL_LINE = 8;
+
+/**
  * 用一段已有的文本构造快照。
  *
  * 行先去掉重复再比：同一句话反复出现（"同感""+1"）不该被算成内容增长。
  * 只取送去分析的那一段：窗口之外的增减与这次分析无关。
  */
 export function snapshotOf(text: string): DiscussionSnapshot {
-  const lines = takeSample(text).split('\n');
-  // 截断处可能是半行，去掉它，免得每次都被算成新增
-  lines.pop();
+  const sample = takeSample(text);
+  const lines = sample.split('\n');
+  // 样本被窗口截断时，最后一行可能是半行，去掉它，免得每次都被算成新增；
+  // 没截断就是内容真的到头了，最后一行也是完整的一条，不该白丢
+  if (sample.length < text.length) {
+    lines.pop();
+  }
 
   return {
     path: window.location.pathname,
-    lines: new Set(lines.filter((line) => line !== '')),
+    lines: new Set(lines.filter((line) => line.length >= MIN_MEANINGFUL_LINE)),
   };
 }
 

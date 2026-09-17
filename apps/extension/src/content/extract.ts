@@ -25,6 +25,18 @@ const SITE_EXPECTATIONS: ReadonlyArray<SiteExpectation> = [
 /** 通用回退：没有站点约定时，按语义容器找，都找不到才用整页。 */
 const GENERIC_SELECTORS = ['#commentapp', 'main', 'article', '[role="main"]'];
 
+/**
+ * 评论区的常见挂载点。
+ *
+ * 讨论是评论之间的事，而 main／article 里往往先是楼主正文：长正文会把窗口占满，
+ * 把评论区挤出镜头。所以这里优先只要评论区，够大才算数——小到只有"评论"两个字的块，
+ * 会把窗口挤成一句话。
+ */
+const COMMENT_SELECTORS = ['#commentapp', '[class*="comment"]', '[id*="comment"]'];
+
+/** 每个选择器最多看几个候选：一个页面里带 comment 字样的节点可能成百上千。 */
+const MAX_COMMENT_CANDIDATES = 8;
+
 /** 这些标签承载导航、装饰或交互控件，不属于讨论内容。 */
 const NOISE_TAGS = new Set([
   'SCRIPT',
@@ -51,7 +63,15 @@ const QUIET_LOAD_TIMEOUT_MS = 8000;
 /** 判定内容已渲染稳定的两次快照间隔。 */
 const SETTLE_INTERVAL_MS = 500;
 
-/** 分析所需的最小样本量：达到它并且连续两次快照一致，才算读到足够的讨论内容。 */
+/**
+ * 连续几次快照一致才算稳定。
+ *
+ * 评论是分批来的，中间有间隙：只隔一次就开算，容易在间隙里"以为读完了"，
+ * 于是刚分析完又跳一次"讨论有新变化"。
+ */
+const SETTLED_SNAPSHOTS = 3;
+
+/** 分析所需的最小样本量：达到它、并且连着几次快照都不再增长，才算读到足够的讨论内容。 */
 const MIN_SAMPLE_LENGTH = 2000;
 
 /**
@@ -84,6 +104,11 @@ export function extractDiscussion(): DiscussionContent {
     return root === null ? NOT_READY : toContent(root);
   }
 
+  const comments = findCommentContent();
+  if (comments !== null) {
+    return comments;
+  }
+
   for (const selector of GENERIC_SELECTORS) {
     const found = document.querySelector(selector);
     if (found !== null) {
@@ -94,6 +119,30 @@ export function extractDiscussion(): DiscussionContent {
     }
   }
   return toContent(document.body);
+}
+
+/**
+ * 优先取评论区的内容。
+ *
+ * 评论区还没加载出来时不硬取：那时容器里可能只有"评论"两个字，与其拿它去分析，
+ * 不如退回整页——有内容的判断总比没有强。
+ */
+function findCommentContent(): DiscussionContent | null {
+  for (const selector of COMMENT_SELECTORS) {
+    let checked = 0;
+    for (const candidate of document.querySelectorAll(selector)) {
+      if (checked >= MAX_COMMENT_CANDIDATES) {
+        break;
+      }
+      checked += 1;
+
+      const content = toContent(candidate);
+      if (content.status === 'ready' && content.charCount >= MIN_SAMPLE_LENGTH) {
+        return content;
+      }
+    }
+  }
+  return null;
 }
 
 /**
@@ -175,21 +224,24 @@ function moveIntoViewportQuietly(target: HTMLElement): () => void {
   };
 }
 
-/** 等到样本达到下限、且连续两次快照一致，说明渲染已经稳定。超时则返回最后读到的东西。 */
+/** 等到样本达到下限、且连着几次快照都不再增长，说明渲染已经稳定。超时则返回最后读到的东西。 */
 async function waitForSettledSample(deadline: number): Promise<DiscussionContent> {
   let previousText = '';
+  let stableCount = 0;
   let content = extractDiscussion();
 
   while (Date.now() < deadline) {
     await delay(SETTLE_INTERVAL_MS);
     content = extractDiscussion();
 
-    if (
-      content.status === 'ready' &&
-      content.charCount >= MIN_SAMPLE_LENGTH &&
-      content.text === previousText
-    ) {
-      return content;
+    if (content.status === 'ready' && content.text === previousText) {
+      stableCount += 1;
+      if (stableCount >= SETTLED_SNAPSHOTS && content.charCount >= MIN_SAMPLE_LENGTH) {
+        return content;
+      }
+    } else {
+      // 变了就重新数：评论还在往里加，现在不是开算的时候
+      stableCount = 0;
     }
     previousText = content.status === 'ready' ? content.text : '';
   }
