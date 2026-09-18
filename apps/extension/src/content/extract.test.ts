@@ -9,6 +9,13 @@ describe('站点期望', () => {
     expect(expectationFor('m.weibo.cn')?.selector).toBe('.comment-content');
   });
 
+  it('站点管自己那条讨论叫什么，各说各的', () => {
+    expect(expectationFor('www.bilibili.com')?.itemNoun).toBe('评论');
+    expect(expectationFor('m.weibo.cn')?.itemNoun).toBe('评论');
+    // 知乎读到的是回答，不是回答下面的评论（那些要点开才在）
+    expect(expectationFor('www.zhihu.com')?.itemNoun).toBe('回答');
+  });
+
   it('桌面微博不在表里：它的评论是虚拟列表，读不到固定的一段', () => {
     expect(expectationFor('weibo.com')).toBeNull();
   });

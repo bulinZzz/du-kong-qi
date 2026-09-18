@@ -8,8 +8,17 @@
  * 所以这里也不做"整页回退去凑内容"：那会把导航与推荐位当成讨论正文，比没读到更糟。
  */
 export type DiscussionContent =
-  | { status: 'ready'; text: string; charCount: number }
+  | { status: 'ready'; text: string; charCount: number; items: ReadItems | null }
   | { status: 'notReady' };
+
+/**
+ * 这一次读到几条内容，以及那个站点管它叫什么。
+ *
+ * 条数只数到"送去分析的那一段"为止：页面上往往还有更多（知乎的问题页有几百个回答，
+ * 一万字的窗口只装得下前几个），报出去的必须是结论真正覆盖到的那几条。
+ * 只有认得出"一条内容长什么样"的站点才报得出来，其余站点是 null。
+ */
+export type ReadItems = { count: number; noun: string };
 
 /** 已经读到内容的那一种，调用方判过之后传它，免得下游再判一次。 */
 export type DiscussionReady = Extract<DiscussionContent, { status: 'ready' }>;
@@ -28,12 +37,26 @@ type SiteExpectation = {
   selector: string;
   /** 内容区在容器影子根里的站点才有；缺省表示容器本身就是内容区。 */
   innerShadowSelector?: string;
+  /** 一条内容在容器里长什么样，用来数"读到了几条"；缺省数容器的直接子节点。 */
+  itemSelector?: string;
+  /** 这个站点管一条内容叫什么。浮窗要照着说，不替它编一个通用的词。 */
+  itemNoun: string;
 };
 
 const SITE_EXPECTATIONS: ReadonlyArray<SiteExpectation> = [
-  { hostSuffix: 'bilibili.com', selector: 'bili-comments', innerShadowSelector: '#feed' },
-  { hostSuffix: 'zhihu.com', selector: '#QuestionAnswers-answers' },
-  { hostSuffix: 'weibo.cn', selector: '.comment-content' },
+  {
+    hostSuffix: 'bilibili.com',
+    selector: 'bili-comments',
+    innerShadowSelector: '#feed',
+    itemNoun: '评论',
+  },
+  {
+    hostSuffix: 'zhihu.com',
+    selector: '#QuestionAnswers-answers',
+    itemSelector: '.AnswerItem',
+    itemNoun: '回答',
+  },
+  { hostSuffix: 'weibo.cn', selector: '.comment-content', itemNoun: '评论' },
 ];
 
 /** 通用回退：没有站点约定时，按语义容器找，都找不到才用整页。 */
@@ -155,7 +178,7 @@ export function extractDiscussion(): DiscussionContent {
   const expectation = findSiteExpectation();
   if (expectation !== null) {
     const root = resolveExpectation(expectation);
-    return root === null ? NOT_READY : toContent(root);
+    return root === null ? NOT_READY : toContent(root, countReadItems(root, expectation));
   }
 
   const comments = findCommentContent();
@@ -166,13 +189,13 @@ export function extractDiscussion(): DiscussionContent {
   for (const selector of GENERIC_SELECTORS) {
     const found = document.querySelector(selector);
     if (found !== null) {
-      const content = toContent(found);
+      const content = toContent(found, null);
       if (content.status === 'ready') {
         return content;
       }
     }
   }
-  return toContent(document.body);
+  return toContent(document.body, null);
 }
 
 /**
@@ -190,7 +213,7 @@ function findCommentContent(): DiscussionContent | null {
       }
       checked += 1;
 
-      const content = toContent(candidate);
+      const content = toContent(candidate, null);
       if (content.status === 'ready' && content.charCount >= MIN_COMMENT_SECTION_LENGTH) {
         return content;
       }
@@ -355,9 +378,31 @@ function findDiscussionContainer(): Element | null {
   return null;
 }
 
-function toContent(root: Element | ShadowRoot): DiscussionContent {
+function toContent(root: Element | ShadowRoot, items: ReadItems | null): DiscussionContent {
   const text = collectText(root);
-  return text === '' ? NOT_READY : { status: 'ready', text, charCount: text.length };
+  return text === '' ? NOT_READY : { status: 'ready', text, charCount: text.length, items };
+}
+
+/**
+ * 数一数送去分析的那一段里有几条内容。
+ *
+ * 按顺序累加每条内容自己的文字，累过窗口就不再数：报出去的条数必须是结论真正覆盖到的那几条。
+ * 页面上通常还有更多（知乎的问题页有几百个回答），数多了就是替结论吹牛。
+ */
+function countReadItems(root: Element | ShadowRoot, expectation: SiteExpectation): ReadItems {
+  const items = root.querySelectorAll(expectation.itemSelector ?? ':scope > *');
+  let used = 0;
+  let count = 0;
+
+  for (const item of items) {
+    if (used >= MAX_SAMPLE_CHARS) {
+      break;
+    }
+    count += 1;
+    used += collectText(item).length;
+  }
+
+  return { count, noun: expectation.itemNoun };
 }
 
 function collectText(root: Element | ShadowRoot): string {

@@ -9,7 +9,14 @@ import { PRIVACY_TEXT } from '../shared/privacy';
  */
 export type PanelView =
   | { kind: 'loading'; phase: 'readingComments' | 'analyzing' }
-  | { kind: 'result'; analysis: AtmosphereAnalysis; expired: boolean; privacyNotice: boolean }
+  | {
+      kind: 'result';
+      analysis: AtmosphereAnalysis;
+      expired: boolean;
+      privacyNotice: boolean;
+      /** 这次结论读到几条内容、它们叫什么；认不出来的站点为 null。 */
+      readItems: { count: number; noun: string } | null;
+    }
   | { kind: 'failure'; reason: AnalysisFailureReason; privacyNotice: boolean }
   | { kind: 'pageChanged' }
   | { kind: 'discussionReplaced' }
@@ -357,7 +364,7 @@ function createPanel(view: PanelView, actions: PanelActions): HTMLElement {
       break;
 
     case 'result':
-      body.append(...createResult(view.analysis));
+      body.append(...createResult(view.analysis, view.readItems));
       if (view.expired) {
         body.append(
           createLine(EXPIRED_NOTE, 'font-size: 13px; opacity: 0.8'),
@@ -650,7 +657,17 @@ function enableDrag(element: HTMLElement, handle: HTMLElement): void {
   });
 }
 
-function createResult(analysis: AtmosphereAnalysis): HTMLElement[] {
+/**
+ * 结论区：分数、摘要、依据，最后一行说明这份结论建立在多少条内容上。
+ *
+ * 条数垫底而不是摆在分数旁边：它是这份结论的底细，不是结论本身。说"约"是因为
+ * 一万字的窗口常常只装得下页面上的前几条，页面上还有更多（见 extract 里的计数）。
+ * 认不出"一条内容"的站点不给这一行，而不是编一个通用的词凑上。
+ */
+function createResult(
+  analysis: AtmosphereAnalysis,
+  readItems: { count: number; noun: string } | null,
+): HTMLElement[] {
   const lines: HTMLElement[] = [createScore(analysis), createLine(analysis.summary, '')];
 
   if (analysis.evidence.length > 0) {
@@ -658,6 +675,11 @@ function createResult(analysis: AtmosphereAnalysis): HTMLElement[] {
   }
   if (analysis.confidence < LOW_CONFIDENCE) {
     lines.push(createLine('这里的内容不太好判断', 'font-size: 13px; opacity: 0.8'));
+  }
+  if (readItems !== null && readItems.count > 0) {
+    lines.push(
+      createLine(`读了约 ${readItems.count} 条${readItems.noun}`, 'font-size: 13px; opacity: 0.8'),
+    );
   }
 
   return lines;

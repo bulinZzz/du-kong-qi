@@ -53,8 +53,13 @@ const world = globalThis as typeof globalThis & {
 /** 页面变化轮询的定时器。 */
 let watchTimer: number | null = null;
 
-/** 最近一次成功的结果：内容变多时要把它和提示一起留在浮窗上。 */
-let lastAnalysis: AtmosphereAnalysis | null = null;
+/**
+ * 最近一次成功的结果，连同它的底细（读到几条内容）。
+ *
+ * 两样一起留：内容变多时要把旧分数和提示一起留在浮窗上，而"读了约 N 条"说的是这份结论
+ * 覆盖到哪儿——分开存迟早会漏掉一处，让分数配上一个不属于它的条数。
+ */
+let lastResult: { analysis: AtmosphereAnalysis; readItems: DiscussionReady['items'] } | null = null;
 
 /**
  * 这一次分析的凭据：为空表示没有正在进行、也不该再画的分析。
@@ -200,17 +205,23 @@ async function analyzeAndShow(
   const privacyNotice = await takePrivacyNotice();
 
   if (outcome.status === 'ok') {
-    lastAnalysis = outcome.analysis;
+    lastResult = { analysis: outcome.analysis, readItems: content.items };
     renderPanel(
       host,
-      { kind: 'result', analysis: outcome.analysis, expired: false, privacyNotice },
+      {
+        kind: 'result',
+        analysis: outcome.analysis,
+        expired: false,
+        privacyNotice,
+        readItems: content.items,
+      },
       createActions(host),
     );
     watchForChanges(host, snapshotOf(sample));
     return;
   }
 
-  lastAnalysis = null;
+  lastResult = null;
   renderPanel(host, { kind: 'failure', reason: outcome.reason, privacyNotice }, createActions(host));
 }
 
@@ -270,25 +281,31 @@ function checkChanges(host: PanelTarget, baseline: DiscussionSnapshot): void {
 
   if (hasPageChanged(baseline, current)) {
     stopWatching();
-    lastAnalysis = null;
+    lastResult = null;
     renderPanel(host, { kind: 'pageChanged' }, createActions(host));
     return;
   }
 
   // 被分析的那批讨论整段换了（换排序、换筛选）：旧分数与眼前的内容无关，
-  // 和换页一样不给，也不留 lastAnalysis
+  // 和换页一样不给，也不留 lastResult
   if (hasContentReplaced(baseline, current)) {
     stopWatching();
-    lastAnalysis = null;
+    lastResult = null;
     renderPanel(host, { kind: 'discussionReplaced' }, createActions(host));
     return;
   }
 
-  if (hasContentChanged(baseline, current) && lastAnalysis !== null) {
+  if (hasContentChanged(baseline, current) && lastResult !== null) {
     stopWatching();
     renderPanel(
       host,
-      { kind: 'result', analysis: lastAnalysis, expired: true, privacyNotice: false },
+      {
+        kind: 'result',
+        analysis: lastResult.analysis,
+        expired: true,
+        privacyNotice: false,
+        readItems: lastResult.readItems,
+      },
       createActions(host),
     );
   }
@@ -319,7 +336,7 @@ function createActions(host: PanelTarget): PanelActions {
     close: () => {
       // 用户主动收工：不该还在读页面，也不该让还在等结论的那段代码把浮窗又画回来
       shutdown();
-      lastAnalysis = null;
+      lastResult = null;
       host.replaceChildren();
     },
     autoOpenFrameUrl: autoOpenFrameUrl(),
