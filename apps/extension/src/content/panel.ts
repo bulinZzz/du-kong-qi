@@ -660,9 +660,9 @@ function enableDrag(element: HTMLElement, handle: HTMLElement): void {
 /**
  * 结论区：分数、摘要、依据，最后一行说明这份结论建立在多少条内容上。
  *
- * 条数垫底而不是摆在分数旁边：它是这份结论的底细，不是结论本身。说"前面"是因为
- * 窗口一满就不再往里取——那样这句读起来是"我们读到这儿"，而不是"这页只有这么多"；
- * 说"约"是因为一万字的窗口常常只装得下页面上的前几条，页面上还有更多（见 extract 里的计数）。
+ * 条数垫底而不是摆在分数旁边：它是这份结论的底细，不是结论本身。说"其中"是因为
+ * 一万字的窗口摊在整段上，读到的只是里面几条，不是开头连续几条；说"约"是因为
+ * 窗口边界落在两条之间，最后一条可能只进去一半（见 extract 里的取样与计数）。
  * 认不出"一条内容"的站点不给这一行，而不是编一个通用的词凑上。
  */
 function createResult(
@@ -680,7 +680,7 @@ function createResult(
   if (readItems !== null && readItems.count > 0) {
     lines.push(
       createLine(
-        `读了前面约 ${readItems.count} 条${readItems.noun}`,
+        `读了其中约 ${readItems.count} 条${readItems.noun}`,
         'font-size: 13px; opacity: 0.8',
       ),
     );

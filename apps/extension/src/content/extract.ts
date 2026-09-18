@@ -154,10 +154,17 @@ const MIN_COMMENT_SECTION_LENGTH = 2000;
 /**
  * 送去分析的最大长度。
  *
- * 后端还会再截断一次作为兜底，但"这次分析覆盖了哪一段"由这里决定：过期判断比对的也是这一段，
- * 否则用户只是往下翻、让窗口之外加载出更多评论，也会被提示"内容变了"。
+ * 后端还会再截断一次作为兜底，但"这次分析覆盖了哪一段"由这里决定：过期判断比对的也是这一段。
  */
 const MAX_SAMPLE_CHARS = 10000;
+
+/**
+ * 窗口分成几段取。
+ *
+ * 只取开头会让"读到哪一批"决定结论：换排序、刚发生的反转都落在窗口外。摊成几段之后，
+ * 开头、中间、结尾都在样本里，结论不再取决于"排在前面的那批"长什么样。
+ */
+const SAMPLE_CHUNKS = 5;
 
 /** 把讨论容器搬进视口时，让它的顶部停在视口内这个位置。 */
 const QUIET_TOP_OFFSET = 120;
@@ -178,7 +185,7 @@ export function extractDiscussion(): DiscussionContent {
   const expectation = findSiteExpectation();
   if (expectation !== null) {
     const root = resolveExpectation(expectation);
-    return root === null ? NOT_READY : toContent(root, countReadItems(root, expectation));
+    return root === null ? NOT_READY : toContent(root, expectation);
   }
 
   const comments = findCommentContent();
@@ -337,9 +344,65 @@ function isInViewport(target: Element): boolean {
   return rect.bottom > 0 && rect.top < window.innerHeight;
 }
 
-/** 取出送去分析的那一段：讨论的前部内容。 */
-export function takeSample(text: string): string {
-  return text.slice(0, MAX_SAMPLE_CHARS);
+/**
+ * 取出送去分析的那一段。
+ *
+ * 整段摊成几处并列的窗口：第一处贴开头，最后一处贴结尾，中间等距铺开，各自取满预算。
+ * 这么做是因为"只取开头"会把结论绑在排在最前面的那批上——讨论有反转时，新声音在开头
+ * 还很稀，取开头就会报旧气氛（见开发记录里"截断代表"的四次实测）。
+ *
+ * 按行取：窗口边界落在行与行之间，不在句子中间切开。短于窗口时原样给出。
+ */
+export function sampleOf(lines: readonly string[]): string {
+  const whole = lines.join('\n');
+  if (whole.length <= MAX_SAMPLE_CHARS) {
+    return whole;
+  }
+
+  const offsets: number[] = [];
+  let offset = 0;
+  for (const line of lines) {
+    offsets.push(offset);
+    offset += line.length + 1;
+  }
+
+  const budget = Math.floor(MAX_SAMPLE_CHARS / SAMPLE_CHUNKS);
+  // 首尾两个窗口各贴一端，中间的等距铺开。整段比窗口长，所以间距必然大于一个窗口的预算，
+  // 窗口之间不会重叠。
+  const spacing = (whole.length - budget) / (SAMPLE_CHUNKS - 1);
+  const picked: string[] = [];
+  let cursor = 0;
+
+  for (let chunk = 0; chunk < SAMPLE_CHUNKS - 1; chunk += 1) {
+    const from = chunk === 0 ? 0 : Math.ceil(chunk * spacing);
+    while (cursor < lines.length && offsets[cursor] < from) {
+      cursor += 1;
+    }
+    let used = 0;
+    for (let index = cursor; index < lines.length; index += 1) {
+      // 放不下就停：宁可少一行，也不要让总量越过上限——后端会按字符硬切，那才真的切在句子中间
+      const cost = lines[index].length + 1;
+      if (used + cost > budget) {
+        break;
+      }
+      picked.push(lines[index]);
+      used += cost;
+    }
+  }
+
+  // 最后一段从结尾往回取：结尾那一条必须在样本里，否则"贴结尾"是句空话
+  const tail: string[] = [];
+  let tailUsed = 0;
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const cost = lines[index].length + 1;
+    if (tailUsed + cost > budget) {
+      break;
+    }
+    tail.unshift(lines[index]);
+    tailUsed += cost;
+  }
+
+  return picked.concat(tail).join('\n');
 }
 
 function findSiteExpectation(): SiteExpectation | null {
@@ -378,37 +441,51 @@ function findDiscussionContainer(): Element | null {
   return null;
 }
 
-function toContent(root: Element | ShadowRoot, items: ReadItems | null): DiscussionContent {
-  const text = collectText(root);
-  return text === '' ? NOT_READY : { status: 'ready', text, charCount: text.length, items };
+function toContent(root: Element | ShadowRoot, expectation: SiteExpectation | null): DiscussionContent {
+  const lines = collectLines(root);
+  const text = sampleOf(lines);
+  if (text === '') {
+    return NOT_READY;
+  }
+  return {
+    status: 'ready',
+    text,
+    // 整段的长度，不是窗口长度：判"这块够不够大、值不值得优先于整页"用的是它
+    charCount: lines.join('\n').length,
+    items: expectation === null ? null : countReadItems(root, expectation, text),
+  };
 }
 
 /**
- * 数一数送去分析的那一段里有几条内容。
+ * 数一数送去分析的那一段里覆盖到几条内容。
  *
- * 按顺序累加每条内容自己的文字，累过窗口就不再数：报出去的条数必须是结论真正覆盖到的那几条。
- * 页面上通常还有更多（知乎的问题页有几百个回答），数多了就是替结论吹牛。
+ * 与取样同一套判据：某条内容只要有一行进了窗口就算读到了。窗口是摊开的，所以数出来的是
+ * "覆盖到几条"，不是"开头连续几条"。页面上通常还有更多（知乎的问题页有几百个回答），
+ * 数多了就是替结论吹牛。
  */
-function countReadItems(root: Element | ShadowRoot, expectation: SiteExpectation): ReadItems {
+function countReadItems(
+  root: Element | ShadowRoot,
+  expectation: SiteExpectation,
+  sample: string,
+): ReadItems {
+  const sampled = new Set(sample.split('\n'));
   const items = root.querySelectorAll(expectation.itemSelector ?? ':scope > *');
-  let used = 0;
   let count = 0;
 
   for (const item of items) {
-    if (used >= MAX_SAMPLE_CHARS) {
-      break;
+    if (collectLines(item).some((line) => sampled.has(line))) {
+      count += 1;
     }
-    count += 1;
-    used += collectText(item).length;
   }
 
   return { count, noun: expectation.itemNoun };
 }
 
-function collectText(root: Element | ShadowRoot): string {
+/** 逐节点读出讨论的行，并丢掉页面自己的界面文字。 */
+function collectLines(root: Element | ShadowRoot): string[] {
   const parts: string[] = [];
   appendText(root, parts);
-  return dropUiNoise(parts).join('\n');
+  return dropUiNoise(parts);
 }
 
 /** 丢掉页面自己的界面文字，只留讨论。全部被丢掉时调用方会判为"没读到"。 */

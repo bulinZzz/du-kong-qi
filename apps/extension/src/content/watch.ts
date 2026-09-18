@@ -1,4 +1,4 @@
-import { extractDiscussion, takeSample } from './extract';
+import { extractDiscussion } from './extract';
 
 /**
  * 讨论内容的快照：被分析那一段的行集合，与当时的路径。
@@ -38,20 +38,14 @@ const MIN_MEANINGFUL_LINE = 8;
  * 用一段已有的文本构造快照。
  *
  * 行先去掉重复再比：同一句话反复出现（"同感""+1"）不该被算成内容增长。
- * 只取送去分析的那一段：窗口之外的增减与这次分析无关。
+ * 交进来的已经是送去分析的那一段（窗口在提取时切好），窗口之外的增长与这次分析无关。
  */
 export function snapshotOf(text: string): DiscussionSnapshot {
-  const sample = takeSample(text);
-  const lines = sample.split('\n');
-  // 样本被窗口截断时，最后一行可能是半行，去掉它，免得每次都被算成新增；
-  // 没截断就是内容真的到头了，最后一行也是完整的一条，不该白丢
-  if (sample.length < text.length) {
-    lines.pop();
-  }
+  const lines = text.split('\n').filter((line) => line.length >= MIN_MEANINGFUL_LINE);
 
   return {
     path: window.location.pathname,
-    lines: new Set(lines.filter((line) => line.length >= MIN_MEANINGFUL_LINE)),
+    lines: new Set(lines),
   };
 }
 

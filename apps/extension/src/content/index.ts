@@ -3,7 +3,6 @@ import {
   extractDiscussion,
   loadDiscussionByScrolling,
   loadDiscussionQuietly,
-  takeSample,
 } from './extract';
 import { type PanelActions, type PanelTarget, renderPanel, restorePanelState, setAutoOpen } from './panel';
 import { loadPanelState, rememberPanelState } from './panel-state';
@@ -192,7 +191,8 @@ async function analyzeAndShow(
 ): Promise<void> {
   renderPanel(host, { kind: 'loading', phase: 'analyzing' }, createActions(host));
 
-  const sample = takeSample(content.text);
+  // 窗口在提取时就切好了：送去分析的、过期判断比对的、面板上说的条数，三处都是它
+  const sample = content.text;
   const outcome = await requestAnalysis(sample);
   // 用户已经关了浮窗，或又开了新的一轮：这次不再画，说明也不记——
   // 等下一次分析跟着结局一起说，总好过记成"说过"而其实没人看见

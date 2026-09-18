@@ -1,5 +1,40 @@
 import { describe, expect, it } from 'vitest';
-import { dropUiNoise, expectationFor } from './extract';
+import { dropUiNoise, expectationFor, sampleOf } from './extract';
+
+describe('取样窗口', () => {
+  const line = (index: number): string => `第 ${index} 条：这一行的长度基本一致，用来把整段撑过一万字。`;
+  const longEnough = (): string[] => Array.from({ length: 600 }, (_, index) => line(index));
+
+  it('短于窗口时原样给出', () => {
+    expect(sampleOf(['甲', '乙', '丙'])).toBe('甲\n乙\n丙');
+  });
+
+  it('长于窗口时把整段摊开：开头与结尾都进得来', () => {
+    const lines = longEnough();
+    const sampled = sampleOf(lines).split('\n');
+
+    expect(sampleOf(lines).length).toBeLessThanOrEqual(10000);
+    expect(sampled).toContain(line(0));
+    expect(sampled).toContain(line(lines.length - 1));
+  });
+
+  it('不在句子中间切开：样本里每一行都是完整的原文行', () => {
+    const originals = new Set(longEnough());
+
+    expect(sampleOf(longEnough()).split('\n').every((item) => originals.has(item))).toBe(true);
+  });
+
+  it('覆盖整段：每一截里都取到了行', () => {
+    const lines = longEnough();
+    const sampled = sampleOf(lines).split('\n');
+    const span = 120;
+
+    for (let start = 0; start < lines.length; start += span) {
+      const section = lines.slice(start, start + span);
+      expect(sampled.some((item) => section.includes(item))).toBe(true);
+    }
+  });
+});
 
 describe('站点期望', () => {
   it('每个已适配站点各有自己的讨论容器，子域也算', () => {
