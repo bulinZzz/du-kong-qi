@@ -14,15 +14,26 @@ export type DiscussionContent =
 /** 已经读到内容的那一种，调用方判过之后传它，免得下游再判一次。 */
 export type DiscussionReady = Extract<DiscussionContent, { status: 'ready' }>;
 
-/** 已适配站点：讨论页上容器在页面骨架里，只是要滚到附近才渲染出内容。 */
+/**
+ * 已适配站点：给出该站点里承载讨论的容器。
+ *
+ * 按容器找，不按页面类型找——同一个站点的页面类型多得数不清（首页、搜索、直播间、
+ * 会员购、热榜、专栏……），这张表补不全，还会随改版失效。容器在就按它读，不在就说没读到。
+ *
+ * 站点之间的差异只有两处：内容区在不在影子根里，以及要不要等它渲染。B 站两样都占，
+ * 所以多一个内层选择器、还要无感加载；知乎与微博移动站的讨论在页面加载时就已渲染好。
+ */
 type SiteExpectation = {
   hostSuffix: string;
   selector: string;
+  /** 内容区在容器影子根里的站点才有；缺省表示容器本身就是内容区。 */
   innerShadowSelector?: string;
 };
 
 const SITE_EXPECTATIONS: ReadonlyArray<SiteExpectation> = [
   { hostSuffix: 'bilibili.com', selector: 'bili-comments', innerShadowSelector: '#feed' },
+  { hostSuffix: 'zhihu.com', selector: '#QuestionAnswers-answers' },
+  { hostSuffix: 'weibo.cn', selector: '.comment-content' },
 ];
 
 /** 通用回退：没有站点约定时，按语义容器找，都找不到才用整页。 */
@@ -309,7 +320,11 @@ export function takeSample(text: string): string {
 }
 
 function findSiteExpectation(): SiteExpectation | null {
-  const host = window.location.hostname;
+  return expectationFor(window.location.hostname);
+}
+
+/** 站点期望按域名后缀匹配，子域（`www`、`zhuanlan`）一并算在内。 */
+export function expectationFor(host: string): SiteExpectation | null {
   return SITE_EXPECTATIONS.find((expectation) => host.endsWith(expectation.hostSuffix)) ?? null;
 }
 

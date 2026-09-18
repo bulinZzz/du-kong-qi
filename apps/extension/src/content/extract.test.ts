@@ -1,5 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { dropUiNoise } from './extract';
+import { dropUiNoise, expectationFor } from './extract';
+
+describe('站点期望', () => {
+  it('每个已适配站点各有自己的讨论容器，子域也算', () => {
+    expect(expectationFor('www.bilibili.com')?.selector).toBe('bili-comments');
+    expect(expectationFor('www.zhihu.com')?.selector).toBe('#QuestionAnswers-answers');
+    expect(expectationFor('zhuanlan.zhihu.com')?.selector).toBe('#QuestionAnswers-answers');
+    expect(expectationFor('m.weibo.cn')?.selector).toBe('.comment-content');
+  });
+
+  it('桌面微博不在表里：它的评论是虚拟列表，读不到固定的一段', () => {
+    expect(expectationFor('weibo.com')).toBeNull();
+  });
+
+  it('没适配的站点没有期望，交给通用回退', () => {
+    expect(expectationFor('example.com')).toBeNull();
+  });
+});
 
 describe('界面文字过滤', () => {
   it('丢掉时间：绝对时间与相对时间', () => {
