@@ -11,6 +11,7 @@ import { takePrivacyNotice } from './privacy-notice';
 import {
   type DiscussionSnapshot,
   hasContentChanged,
+  hasContentReplaced,
   hasPageChanged,
   snapshotOf,
   takeSnapshot,
@@ -21,7 +22,7 @@ import {
   type AnalyzeMessage,
   type ExtensionMessage,
   type RequestAutoOpenMessage,
-  SHOW_PANEL,
+  SHOW_PANEL_TYPE,
 } from '../shared/messages';
 import type { AnalysisOutcome, AtmosphereAnalysis } from '../shared/protocol';
 
@@ -83,8 +84,8 @@ function start(): void {
   const root = host.shadowRoot ?? host.attachShadow({ mode: 'open' });
 
   const listener = (message: ExtensionMessage): void => {
-    if (message.type === SHOW_PANEL.type) {
-      void runAnalysis(root);
+    if (message.type === SHOW_PANEL_TYPE) {
+      void runAnalysis(root, message.auto);
     }
   };
 
@@ -126,10 +127,15 @@ function createHost(): HTMLElement {
 }
 
 /**
- * 一次分析：先用页面上现成的内容；读不到就无感加载评论区；再读不到才把兜底按钮交给用户。
+ * 一次分析：先用页面上现成的内容；读不到就无感加载评论区；再读不到才把结论交给用户。
  * 无感加载不移动页面，用户在正常路径上只会看到加载提示与结果。
+ *
+ * `auto` 表示这次是进站自动打开的，不是用户点的图标。两条路径只差一件事：自动打开
+ * 只认"读到了"——没读到就不出现，连"正在读评论区"也不闪。这个站点的页面类型多得数不清，
+ * 我们不知道哪一页该有讨论区，能确定的只有"读到了没有"；而在没读到的地方弹一块东西出来，
+ * 无论写什么都是在替用户下结论。
  */
-async function runAnalysis(host: PanelTarget): Promise<void> {
+async function runAnalysis(host: PanelTarget, auto: boolean): Promise<void> {
   stopWatching();
   const run = beginRun();
 
@@ -139,7 +145,10 @@ async function runAnalysis(host: PanelTarget): Promise<void> {
     return;
   }
 
-  renderPanel(host, { kind: 'loading', phase: 'readingComments' }, createActions(host));
+  if (!auto) {
+    renderPanel(host, { kind: 'loading', phase: 'readingComments' }, createActions(host));
+  }
+
   const loaded = await loadDiscussionQuietly();
   if (!isCurrentRun(run)) {
     return;
@@ -148,6 +157,10 @@ async function runAnalysis(host: PanelTarget): Promise<void> {
     await analyzeAndShow(host, loaded, run);
     return;
   }
+  if (auto) {
+    return;
+  }
+
   renderPanel(host, { kind: 'empty', retried: false }, createActions(host));
 }
 
@@ -262,6 +275,15 @@ function checkChanges(host: PanelTarget, baseline: DiscussionSnapshot): void {
     return;
   }
 
+  // 被分析的那批讨论整段换了（换排序、换筛选）：旧分数与眼前的内容无关，
+  // 和换页一样不给，也不留 lastAnalysis
+  if (hasContentReplaced(baseline, current)) {
+    stopWatching();
+    lastAnalysis = null;
+    renderPanel(host, { kind: 'discussionReplaced' }, createActions(host));
+    return;
+  }
+
   if (hasContentChanged(baseline, current) && lastAnalysis !== null) {
     stopWatching();
     renderPanel(
@@ -292,7 +314,7 @@ function createActions(host: PanelTarget): PanelActions {
       void readByScrolling(host);
     },
     reanalyze: () => {
-      void runAnalysis(host);
+      void runAnalysis(host, false);
     },
     close: () => {
       // 用户主动收工：不该还在读页面，也不该让还在等结论的那段代码把浮窗又画回来

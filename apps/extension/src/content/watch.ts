@@ -19,6 +19,14 @@ const CHANGED_RATIO = 0.2;
 const CHANGED_LINES = 10;
 
 /**
+ * 被分析那段的行里，消失这个比例就当作"整段被替换"。
+ *
+ * 换排序、换筛选条件都会让整批评论换掉。它与"评论又多了几条"不是一回事：前者换完，
+ * 被分析的那段一条都不在眼前了，旧分数与眼前的内容无关；后者那段还在，只是又长了。
+ */
+const REPLACED_RATIO = 0.5;
+
+/**
  * 只比够长的行。
  *
  * 相对时间（"3分钟前"→"4分钟前"）与点赞数这类短行每次刷新都可能变，攒几条就够凑到阈值，
@@ -61,9 +69,9 @@ export function hasPageChanged(before: DiscussionSnapshot, now: DiscussionSnapsh
 /**
  * 内容是否变到值得重算。
  *
- * 只比新增行：评论是逐条出现的，新出现的行才说明分析所覆盖的那段变了——
- * 变多、或者换了排序导致整段被替换，都走这条判断。
- * 行数减少通常是渲染差异，不构成重算的理由。
+ * 只比新增行：评论是逐条出现的，新出现的行才说明分析所覆盖的那段变了。
+ * 行数减少通常是渲染差异，不构成重算的理由——整段被换掉那种情形由
+ * {@link hasContentReplaced} 单独判断。
  */
 export function hasContentChanged(before: DiscussionSnapshot, now: DiscussionSnapshot): boolean {
   let added = 0;
@@ -74,4 +82,25 @@ export function hasContentChanged(before: DiscussionSnapshot, now: DiscussionSna
   }
 
   return added >= CHANGED_LINES || added >= Math.max(now.lines.size, 1) * CHANGED_RATIO;
+}
+
+/**
+ * 被分析的那段是否整段被换掉了。
+ *
+ * 判据是"消失"而不是"新增"：换排序之后新来的一批当然也是新的，但真正说明"换了"的是
+ * 原先那批不见了。评论自然增长时旧行都在，这里恒为 false。
+ */
+export function hasContentReplaced(before: DiscussionSnapshot, now: DiscussionSnapshot): boolean {
+  if (before.lines.size === 0) {
+    return false;
+  }
+
+  let gone = 0;
+  for (const line of before.lines) {
+    if (!now.lines.has(line)) {
+      gone += 1;
+    }
+  }
+
+  return gone >= before.lines.size * REPLACED_RATIO;
 }

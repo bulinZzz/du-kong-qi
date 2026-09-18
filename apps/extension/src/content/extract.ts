@@ -1,8 +1,11 @@
 /**
  * 提取结果。
  *
- * notReady 表示讨论内容还没渲染出来——容器尚未挂载，或已挂载但内容为空。
- * 这种状态下不能回退到整页去凑内容，否则导航与推荐位会被当成讨论正文。
+ * 只有两种：读到了，或者没读到。"没读到"不细分原因——想分出"这一页没有讨论区"就得知道
+ * 每种页面长什么样，而页面类型是列不完的（同一个视频站就有首页、搜索、动态、直播间、
+ * 课堂、会员购……），这张表永远补不全，还会随站点改版失效。真话只有一句：没读到内容。
+ *
+ * 所以这里也不做"整页回退去凑内容"：那会把导航与推荐位当成讨论正文，比没读到更糟。
  */
 export type DiscussionContent =
   | { status: 'ready'; text: string; charCount: number }
@@ -11,7 +14,7 @@ export type DiscussionContent =
 /** 已经读到内容的那一种，调用方判过之后传它，免得下游再判一次。 */
 export type DiscussionReady = Extract<DiscussionContent, { status: 'ready' }>;
 
-/** 已适配站点：讨论容器一定存在，只是要滚动到附近才渲染。 */
+/** 已适配站点：讨论页上容器在页面骨架里，只是要滚到附近才渲染出内容。 */
 type SiteExpectation = {
   hostSuffix: string;
   selector: string;
@@ -60,6 +63,17 @@ const NOT_READY: DiscussionContent = { status: 'notReady' };
 /** 无感加载的最长等待时间。 */
 const QUIET_LOAD_TIMEOUT_MS = 8000;
 
+/**
+ * 等讨论容器出现的时间。
+ *
+ * 它远小于上面那个总预算：容器在页面骨架里，实测加载完成时就已经存在，后面才填内容是另一回事。
+ * 给容器留整个预算，会让读不到内容的页面白等满 8 秒，而那种页面恰恰最多。
+ *
+ * 这不是在判断页面类型，只是按实测给等待划一条止损线：容器更晚出现就让它更晚，
+ * 用户仍然可以自己滚一下再来。
+ */
+const CONTAINER_WAIT_MS = 1500;
+
 /** 判定内容已渲染稳定的两次快照间隔。 */
 const SETTLE_INTERVAL_MS = 500;
 
@@ -71,8 +85,14 @@ const SETTLE_INTERVAL_MS = 500;
  */
 const SETTLED_SNAPSHOTS = 3;
 
-/** 分析所需的最小样本量：达到它、并且连着几次快照都不再增长，才算读到足够的讨论内容。 */
-const MIN_SAMPLE_LENGTH = 2000;
+/**
+ * 评论区值得优先于整页的最小体量。
+ *
+ * 它只管"取哪一块"：评论区太小（容器里只有"评论"两个字那种）时退回整页，
+ * 有内容的判断总比没有强。它不参与"要不要继续等"——等待由"连着几次快照一致"决定，
+ * 与字数无关：页面只有几百字时，等满 8 秒也等不来第 604 个字。
+ */
+const MIN_COMMENT_SECTION_LENGTH = 2000;
 
 /**
  * 送去分析的最大长度。
@@ -137,7 +157,7 @@ function findCommentContent(): DiscussionContent | null {
       checked += 1;
 
       const content = toContent(candidate);
-      if (content.status === 'ready' && content.charCount >= MIN_SAMPLE_LENGTH) {
+      if (content.status === 'ready' && content.charCount >= MIN_COMMENT_SECTION_LENGTH) {
         return content;
       }
     }
@@ -146,7 +166,7 @@ function findCommentContent(): DiscussionContent | null {
 }
 
 /**
- * 无感加载：把讨论容器搬进视口，但不动页面，等它渲染出足够的样本。
+ * 无感加载：把讨论容器搬进视口，但不动页面，等它渲染稳定。
  *
  * 视频站的评论要进入视口才会加载。这里用相对定位把容器挪进视口——相对定位不改变布局，
  * 容器原来的位置和页面滚动位置都不变——再配合透明与禁止交互，用户看不到任何变化。
@@ -154,7 +174,9 @@ function findCommentContent(): DiscussionContent | null {
  */
 export async function loadDiscussionQuietly(): Promise<DiscussionContent> {
   const deadline = Date.now() + QUIET_LOAD_TIMEOUT_MS;
-  const target = await waitForContainer(deadline);
+  // 容器只等一小段：实测它在页面加载完成时就已存在（B 站视频页与番剧页都是），
+  // 等满整个预算只是在读不到内容的页面上白等
+  const target = await waitForContainer(Math.min(deadline, Date.now() + CONTAINER_WAIT_MS));
   if (target === null) {
     return extractDiscussion();
   }
@@ -224,7 +246,12 @@ function moveIntoViewportQuietly(target: HTMLElement): () => void {
   };
 }
 
-/** 等到样本达到下限、且连着几次快照都不再增长，说明渲染已经稳定。超时则返回最后读到的东西。 */
+/**
+ * 等到样本连着几次快照都不再增长：那说明这一次渲染结束了。
+ *
+ * 只看"还变不变"，不看字数。曾经要求样本达到某个字数才允许提前结束，结果页面本来就只有
+ * 几百字时，那 8 秒里什么都不会再多——实测一份 603 字的页面，用户等了 8.5 秒才看到结果。
+ */
 async function waitForSettledSample(deadline: number): Promise<DiscussionContent> {
   let previousText = '';
   let stableCount = 0;
@@ -236,7 +263,7 @@ async function waitForSettledSample(deadline: number): Promise<DiscussionContent
 
     if (content.status === 'ready' && content.text === previousText) {
       stableCount += 1;
-      if (stableCount >= SETTLED_SNAPSHOTS && content.charCount >= MIN_SAMPLE_LENGTH) {
+      if (stableCount >= SETTLED_SNAPSHOTS) {
         return content;
       }
     } else {
@@ -271,7 +298,7 @@ function resolveExpectation(expectation: SiteExpectation): Element | ShadowRoot 
   if (expectation.innerShadowSelector === undefined) {
     return found;
   }
-  // 站内约定的内容区还没出现时，宁可判为未就绪，也不要退而取容器头部那些控件文案
+  // 内容区还没出现时，宁可判为未就绪，也不要退而取容器头部那些控件文案
   return found.shadowRoot?.querySelector(expectation.innerShadowSelector) ?? null;
 }
 

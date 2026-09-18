@@ -3,8 +3,21 @@
  * 让消息名写错这类问题在编译期暴露。
  */
 
-/** 后台 → 内容脚本：展示浮窗并开始一次分析。 */
-export type ShowPanelMessage = { type: 'showPanel' };
+/** 消息名。两侧共用它，写错在编译期就暴露。 */
+export const SHOW_PANEL_TYPE = 'showPanel';
+
+/**
+ * 后台 → 内容脚本：展示浮窗并开始一次分析。
+ *
+ * 要区分是不是自动打开，因为两者的期待不同：用户点了图标，无论结果如何都得给他一个说法；
+ * 自动打开只是他在这个站点上顺带授权的事，碰上没有讨论区的页面就不该出现——
+ * 先弹出来再说"没东西可读"，比不出现更烦人。
+ */
+export type ShowPanelMessage = { type: typeof SHOW_PANEL_TYPE; auto: boolean };
+
+export function showPanelMessage(auto: boolean): ShowPanelMessage {
+  return { type: SHOW_PANEL_TYPE, auto };
+}
 
 /**
  * 内容脚本 → 后台：代为请求后端。
@@ -23,8 +36,6 @@ export type AnalyzeMessage = { type: 'analyze'; text: string };
 export type RequestAutoOpenMessage = { type: 'requestAutoOpen'; origin: string };
 
 export type ExtensionMessage = ShowPanelMessage | AnalyzeMessage | RequestAutoOpenMessage;
-
-export const SHOW_PANEL: ShowPanelMessage = { type: 'showPanel' };
 
 export function isAnalyzeMessage(value: unknown): value is AnalyzeMessage {
   if (typeof value !== 'object' || value === null) {

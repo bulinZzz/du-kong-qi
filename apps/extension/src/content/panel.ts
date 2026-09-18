@@ -5,13 +5,14 @@ import { PRIVACY_TEXT } from '../shared/privacy';
  * 浮窗要展示的内容。
  *
  * `privacyNotice` 表示这一次顺带说一次隐私说明。它只挂在真的把文字发出去过的结局上——
- * 拿到了结论，或这次发送失败了；"评论还没加载出来"这类根本没发出请求的状态不带它。
+ * 拿到了结论，或这次发送失败了；"没读到内容"这种根本没发出请求的状态不带它。
  */
 export type PanelView =
   | { kind: 'loading'; phase: 'readingComments' | 'analyzing' }
   | { kind: 'result'; analysis: AtmosphereAnalysis; expired: boolean; privacyNotice: boolean }
   | { kind: 'failure'; reason: AnalysisFailureReason; privacyNotice: boolean }
   | { kind: 'pageChanged' }
+  | { kind: 'discussionReplaced' }
   | { kind: 'empty'; retried: boolean };
 
 /** 浮窗上的操作：渲染层只负责触发，具体行为由内容脚本决定。 */
@@ -68,11 +69,13 @@ const LOW_CONFIDENCE = 0.5;
 /**
  * 结果作废时的提示。
  *
- * 同页内容变化时保留上一次的分数——它没有错，只是样本变了；
- * 整页换掉时不给旧分数——那个分数与当前页面的讨论毫无关系。
+ * 同页内容变多时保留上一次的分数——它没有错，只是样本又长了；
+ * 整页换掉、或同页里被分析的那批评论整段换掉时，不给旧分数——那个分数与眼前的内容无关。
  */
 const EXPIRED_NOTE = '讨论有新变化，要重算吗？';
 const PAGE_CHANGED_NOTE = '页面换过了，要重新分析吗？';
+/** 换排序、换筛选之后，被分析的那批评论整段不在了。不猜为什么换，只说换了。 */
+const DISCUSSION_REPLACED_NOTE = '讨论换了一批，要重新分析吗？';
 const REANALYZE_LABEL = '重新分析';
 
 /**
@@ -370,20 +373,30 @@ function createPanel(view: PanelView, actions: PanelActions): HTMLElement {
       );
       break;
 
+    // 同页里被分析的那批讨论整段换了（换排序、换筛选）：与换页一样不给旧分数
+    case 'discussionReplaced':
+      body.append(
+        createLine(DISCUSSION_REPLACED_NOTE, ''),
+        createButton(REANALYZE_LABEL, actions.reanalyze),
+      );
+      break;
+
     case 'failure':
       body.append(createLine(FAILURE_TEXTS[view.reason], ''));
       break;
 
+    // 没读到内容。不写"还没加载出来"，也不写"这一页没有讨论区"：两者都在替用户下结论，
+    // 而我们真正知道的只有"没读到"。要不要再试一次，用户比我们清楚——人就在那一页上
     case 'empty':
       body.append(
-        createLine(view.retried ? '还是没读到内容。' : '评论还没加载出来。', ''),
+        createLine(view.retried ? '还是没读到可以分析的讨论内容。' : '没读到可以分析的讨论内容。', ''),
         createLine(
           view.retried
-            ? '评论可能要先登录才显示，你也可以自己往下滚一点再点一次。'
-            : '这个页面要滚到评论区才会加载，要我去读一下吗？',
+            ? '也可能要登录之后才看得到。你可以自己往下滚一点，再点一次。'
+            : '如果这一页确实有评论，我可以滚过去再读一次。',
           'font-size: 13px; opacity: 0.8',
         ),
-        createButton(view.retried ? '再试一次' : '好，去读评论区', actions.readDiscussion),
+        createButton(view.retried ? '再试一下' : '好，试一下', actions.readDiscussion),
       );
       break;
   }

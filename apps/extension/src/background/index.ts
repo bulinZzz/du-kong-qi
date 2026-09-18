@@ -1,5 +1,5 @@
 import { isAutoOpenEnabled, originOf } from '../shared/auto-open';
-import { isAnalyzeMessage, isRequestAutoOpenMessage, SHOW_PANEL } from '../shared/messages';
+import { isAnalyzeMessage, isRequestAutoOpenMessage, showPanelMessage } from '../shared/messages';
 import { type AnalysisOutcome, isAtmosphereAnalysis } from '../shared/protocol';
 import { cacheAnalysis, readCachedAnalysis } from './analysis-cache';
 
@@ -31,7 +31,7 @@ chrome.action.onClicked.addListener(async (tab) => {
   }
 
   try {
-    await showPanel(tabId);
+    await showPanel(tabId, false);
   } catch (error) {
     console.error('读空气：浮窗注入失败', error);
   }
@@ -58,19 +58,19 @@ async function openPanelIfAuthorized(tabId: number, url: string): Promise<void> 
   }
 
   try {
-    await showPanel(tabId);
+    await showPanel(tabId, true);
   } catch (error) {
     console.error('读空气：自动打开浮窗失败', error);
   }
 }
 
 /** 注入内容脚本并让它展示浮窗。内容脚本自身会忽略重复注入，所以不必先判断是否已注入。 */
-async function showPanel(tabId: number): Promise<void> {
+async function showPanel(tabId: number, auto: boolean): Promise<void> {
   await chrome.scripting.executeScript({
     target: { tabId },
     files: ['content.js'],
   });
-  await chrome.tabs.sendMessage(tabId, SHOW_PANEL);
+  await chrome.tabs.sendMessage(tabId, showPanelMessage(auto));
 }
 
 /**
