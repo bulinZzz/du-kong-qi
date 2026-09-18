@@ -16,7 +16,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
- * 评分质量的回归基线：三段固定样本分别代表平和讨论、无法判断的内容与明显对立的讨论。
+ * 评分质量的回归基线：五段固定样本——平和、争论明显、对立明显、骂战激烈各一段，
+ * 外加一段无法判断的内容。
+ *
+ * <p>样本都是自造的：真实页面的评论属于别人，不适合固化进仓库，而且它们会随站点变化过期。
+ * 真实样本用于校准（见开发记录），这里留下的是校准之后仍该成立的档位预期。
  *
  * <p>需要真实模型访问，因此默认不参与构建，
  * 手动运行：{@code mvn test -Dgroups=evaluation -Dexcluded.groups=}。
@@ -69,6 +73,22 @@ class FlameIntensityEvaluationTest {
         AtmosphereAnalysis analysis = atmosphereAnalyzer.analyze(HOSTILE_DISCUSSION);
 
         assertThat(analysis.flameIntensity().value()).isBetween(61, 80);
+    }
+
+    @Test
+    @DisplayName("争论明显的讨论：落入争论档，而不是被推高到对立")
+    void debating_discussion_should_score_in_debating_band() {
+        AtmosphereAnalysis analysis = atmosphereAnalyzer.analyze(DEBATING_DISCUSSION);
+
+        assertThat(analysis.flameIntensity().value()).isBetween(41, 60);
+    }
+
+    @Test
+    @DisplayName("已经骂起来的讨论：落入最高档")
+    void fierce_discussion_should_score_in_fierce_band() {
+        AtmosphereAnalysis analysis = atmosphereAnalyzer.analyze(FIERCE_DISCUSSION);
+
+        assertThat(analysis.flameIntensity().value()).isBetween(81, 100);
     }
 
     /**
@@ -196,5 +216,83 @@ class FlameIntensityEvaluationTest {
             9楼：其实这价位 iQOO 也可以看看，拍照调校比想象中好。
 
             2楼：又来个懂哥，你们仨凑一块儿开个水军大会算了。
+            """;
+
+    /**
+     * 争论明显：观点对上了，措辞已经带刺、也有人站队，但没有针对个人的持续对线。
+     */
+    private static final String DEBATING_DISCUSSION = """
+            【求助】孩子上初二，非要一部手机，该给吗
+
+            楼主：初二，班里几乎人人有手机，他说没手机跟同学聊不到一起。我担心一给就收不住，成绩往下掉。
+
+            3楼：初二不给，高中再说。这个年纪的自控力就那样，给了就是给自己找事。别拿社交说事，真朋友不会因为没手机就不理他。
+
+            5楼：楼上这种说法就是典型的懒政。全班都有就他没有，被孤立的是孩子。给，但把规则讲清楚。
+
+            3楼：规则是你说定就能执行的？我见过太多家庭，规则定了三天，之后天天为手机吵架。
+
+            6楼：+1，那种"制定规则"的说法听听就好，真能执行的有几个。
+
+            5楼：执行不了是没当回事，别把自己的将就当成普遍规律。
+
+            8楼：这话说得太满了。别人家管不住，不代表这事不能做。
+
+            5楼：我没说不能做，我是说拿"管不住"当理由不给，本质上是偷懒。
+
+            9楼：又开始上价值了，聊个手机能聊到偷懒，服。
+
+            3楼：试出来的是你家的孩子，不是我的。你愿意赌就赌。
+
+            6楼：吵成这样了，楼主的问题谁还管。
+
+            5楼：话我放这儿了，谁不信谁自己试去。
+
+            7楼：两位都说得太满，一个说必掉，一个说必成，中间那些人算什么。
+
+            12楼：我们初三给的，半个学期掉了四十名，后来跟班主任一起盯了两个月才拉回来。给可以，但要付代价。
+
+            13楼：看到这儿我更晕了，到底给还是不给。
+
+            楼主：……我也更晕了。
+            """;
+
+    /**
+     * 骂战激烈：多轮互相侮辱、扣帽子、约架，几乎不再讨论事情本身，也没有人试图拉回话题。
+     */
+    private static final String FIERCE_DISCUSSION = """
+            【就说一句】这次的视频我看了三遍，别洗了
+
+            楼主：镜头、时间、地点都对得上，还硬说剪辑。护到这个程度，也挺可怜的。
+
+            2楼：你家那位当年干的事你忘了？拿这个出来说事，你脸呢。
+
+            3楼：又开始了，出了事就说是黑子，永远不是自己有问题，标准话术。
+
+            2楼：你是收钱办事的吧，天天蹲这儿，恶心。
+
+            4楼：楼上这种嘴，现实里敢这么说话吗？也就网上横。
+
+            2楼：来，你把地址发出来，看谁怂。
+
+            5楼：一家子都没教养，还教育别人，先照照自己。
+
+            6楼：这评论区烂透了，一群疯狗互相咬。
+
+            2楼：你算什么东西，轮得到你在这儿点评？滚。
+
+            7楼：能不能说点事实。
+
+            2楼：事实就是你这种人也配开口？瞎眼的玩意，回去舔你的主子。
+
+            8楼：有些粉丝真没救，脑子被啃干净了，跟邪教没什么区别。
+
+            9楼：路过，只说一句：难看，两边都难看。
+
+            2楼：你也是来找骂的？一家人一个德行，可怜。
+
+            10楼：都别争了，人家自己都不回应，你们在这儿咬得这么起劲，图什么。
+
+            2楼：闭嘴吧你。谁咬谁啊，先看看你自己什么货色。
             """;
 }
