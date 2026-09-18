@@ -46,6 +46,17 @@ const LOADING_TEXTS = {
 
 type AtmosphereLevel = AtmosphereAnalysis['level'];
 
+/**
+ * 这个读数叫什么。
+ *
+ * 名字要一次交代两件事：这个数字量的是什么，以及哪一端才算糟。它还得跟数字连起来读得通——
+ * 第一版写成"激烈程度"就栽在这里：那是个仪表词，汉语里没有"空气很激烈"这种说法。
+ * "火药味"自带程度与方向（"没什么火药味"／"火药味很浓"），数字大就是糟，不必再补一句解释。
+ *
+ * 圆片上只有一个数字，更没有语境，所以它的悬停与无障碍标签也带上这个名字。
+ */
+const METRIC_LABEL = '火药味';
+
 /** 后端只给等级代码，这里翻成给用户看的措辞。 */
 const LEVEL_LABELS: Record<AtmosphereLevel, string> = {
   PEACEFUL: '基本平和',
@@ -340,9 +351,22 @@ function watchViewport(): void {
   viewportObserver.observe(document.documentElement);
 }
 
-/** 这一次要不要在设置区下面挂上隐私声明。只有真的把文字发出去过的结局才挂。 */
+/**
+ * 这一次要不要在设置区下面挂上隐私声明。只有真的把文字发出去过的结局才挂。
+ *
+ * 关掉之后就不要再放回来：视图对象里带着"这一次要说说明"，而面板每次状态变化（点设置、
+ * 收起再展开、设置区报高度）都会照着同一份视图重画一遍——关掉它，下一次重画它又跟着回来，
+ * 用户读到的是"怎么每次都有"。按"关掉"的意思就是不再看它，所以这里记住关过这一次；
+ * 说没说过由 storage 记着，那是更长期的事。
+ */
+let privacyNoticeClosed = false;
+
 function needsPrivacyNotice(view: PanelView): boolean {
-  return (view.kind === 'result' || view.kind === 'failure') && view.privacyNotice;
+  return (
+    !privacyNoticeClosed &&
+    (view.kind === 'result' || view.kind === 'failure') &&
+    view.privacyNotice
+  );
 }
 
 function createPanel(view: PanelView, actions: PanelActions): HTMLElement {
@@ -418,9 +442,10 @@ function createChip(view: PanelView): HTMLElement {
 
   const chip = document.createElement('button');
   chip.textContent = score ?? '空气';
-  chip.title = '展开读空气';
-  // 圆片上的那个数字对读屏器来说没有来历，所以把动作和读数一起念出来
-  chip.setAttribute('aria-label', score === null ? '展开读空气' : `展开读空气，当前 ${score}`);
+  // 圆片上的那个数字对读屏器来说没有来历，所以把动作、这个数字是什么、读数一起念出来
+  const label = score === null ? '展开读空气' : `展开读空气：${METRIC_LABEL} ${score}`;
+  chip.title = label;
+  chip.setAttribute('aria-label', label);
   chip.style.cssText = [
     SURFACE,
     // 与面板一样是浮在页面上的固定定位，少了它 left/top 不会生效
@@ -718,6 +743,7 @@ function createPrivacyNotice(): HTMLElement {
   title.style.fontWeight = '600';
 
   const close = createIconButton('close', '关闭隐私声明', () => {
+    privacyNoticeClosed = true;
     region.remove();
   });
 
@@ -733,15 +759,19 @@ function createPrivacyNotice(): HTMLElement {
 }
 
 /**
- * 分数：数字占主位，等级降成它旁边的次要标签。
+ * 分数：先写这个数字叫什么，数字占主位，等级降成它旁边的次要标签。
  *
- * 之前两者挤在同一行、字号也只差两级，扫一眼分不出哪个才是结论。
- * 窄到放不下时让等级换行，而不是被裁掉。
+ * 三者都挤在同一行、字号也只差两级时，扫一眼分不出哪个才是结论——所以数字最大，另外两个
+ * 都是 13px 的次要标签；窄到放不下时换行，而不是被裁掉。
  */
 function createScore(analysis: AtmosphereAnalysis): HTMLElement {
   const line = document.createElement('div');
   line.style.cssText =
     'display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin-bottom: 8px';
+
+  const metric = document.createElement('span');
+  metric.textContent = METRIC_LABEL;
+  metric.style.cssText = 'font-size: 13px; opacity: 0.85';
 
   const score = document.createElement('span');
   score.textContent = String(analysis.flameIntensity);
@@ -751,7 +781,7 @@ function createScore(analysis: AtmosphereAnalysis): HTMLElement {
   level.textContent = LEVEL_LABELS[analysis.level];
   level.style.cssText = 'font-size: 13px; opacity: 0.85';
 
-  line.append(score, level);
+  line.append(metric, score, level);
   return line;
 }
 
