@@ -58,6 +58,29 @@ const NOISE_TAGS = new Set([
   'TEXTAREA',
 ]);
 
+/**
+ * 界面文字的行形态。
+ *
+ * 标签与可见性挡不住页面自己的控件文字：评论列表里每条都跟着时间、"共 59 条回复，
+ * 点击查看"、单独一个"回复"。实测这些约占样本的两成——白占一万字的窗口，也让
+ * "讨论有没有变化"的比对多了一堆与讨论无关的行（相对时间还会随时间变）。
+ *
+ * 按行的形态丢，不按站点结构丢：结构每个站点都不一样，而"一条时间戳长什么样"是通用的。
+ * 用户名不在此列——它和"同感"这类短回复长得一样，通用规则分不开，只能靠站点结构识别。
+ */
+const UI_LINE_PATTERNS: readonly RegExp[] = [
+  // 绝对时间：2026-09-17 20:58、22-09-12 11:33、2026-09-17
+  /^\d{2,4}-\d{1,2}-\d{1,2}(\s+\d{1,2}:\d{2}(:\d{2})?)?$/,
+  // 相对时间：刚刚、3分钟前、2 小时前
+  /^(刚刚|\d+\s*(秒|分钟|小时|天|周|个月|年)前)$/,
+  // 回复计数：共 59 条回复，点击查看；共1条回复
+  /^共\s*\d+\s*条回复(，?\s*点击查看)?$/,
+  // 单个标点也算一行，来自被拆开的控件文字
+  /^[，。、；：？！…—～·,.;:?!]+$/,
+  // 光秃秃的控件词
+  /^(点击查看|展开|展开更多|查看更多|加载更多|收起|回复|点赞|点踩|赞|分享|收藏|关注|已关注|举报|置顶|热门|最新|按时间|按热度)$/,
+];
+
 const NOT_READY: DiscussionContent = { status: 'notReady' };
 
 /** 无感加载的最长等待时间。 */
@@ -325,7 +348,12 @@ function toContent(root: Element | ShadowRoot): DiscussionContent {
 function collectText(root: Element | ShadowRoot): string {
   const parts: string[] = [];
   appendText(root, parts);
-  return parts.join('\n');
+  return dropUiNoise(parts).join('\n');
+}
+
+/** 丢掉页面自己的界面文字，只留讨论。全部被丢掉时调用方会判为"没读到"。 */
+export function dropUiNoise(lines: readonly string[]): string[] {
+  return lines.filter((line) => !UI_LINE_PATTERNS.some((pattern) => pattern.test(line)));
 }
 
 function appendText(node: Node, parts: string[]): void {

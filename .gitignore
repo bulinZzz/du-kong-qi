@@ -23,6 +23,10 @@ target/
 node_modules/
 dist/
 
+# ========== 本地测量 ==========
+# 抓取的页面样本与打分脚本，只在本机用来校准评分，不随仓库走
+.calibration/
+
 # ========== OS Files ==========
 .DS_Store
 Thumbs.db
