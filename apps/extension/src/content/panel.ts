@@ -1,10 +1,16 @@
 import type { AnalysisFailureReason, AtmosphereAnalysis } from '../shared/protocol';
+import { PRIVACY_TEXT } from '../shared/privacy';
 
-/** 浮窗要展示的内容。 */
+/**
+ * 浮窗要展示的内容。
+ *
+ * `privacyNotice` 表示这一次顺带说一次隐私说明。它只挂在真的把文字发出去过的结局上——
+ * 拿到了结论，或这次发送失败了；"评论还没加载出来"这类根本没发出请求的状态不带它。
+ */
 export type PanelView =
   | { kind: 'loading'; phase: 'readingComments' | 'analyzing' }
-  | { kind: 'result'; analysis: AtmosphereAnalysis; expired: boolean }
-  | { kind: 'failure'; reason: AnalysisFailureReason }
+  | { kind: 'result'; analysis: AtmosphereAnalysis; expired: boolean; privacyNotice: boolean }
+  | { kind: 'failure'; reason: AnalysisFailureReason; privacyNotice: boolean }
   | { kind: 'pageChanged' }
   | { kind: 'empty'; retried: boolean };
 
@@ -69,7 +75,9 @@ const EXPIRED_NOTE = '讨论有新变化，要重算吗？';
 const PAGE_CHANGED_NOTE = '页面换过了，要重新分析吗？';
 const REANALYZE_LABEL = '重新分析';
 
-/** 浮窗尺寸与贴边留白。上限不设常量：跟屏幕走，用户不该撞到一个数字上。 */
+/**
+ * 浮窗尺寸与贴边留白。上限不设常量：跟屏幕走，用户不该撞到一个数字上。
+ */
 const DEFAULT_PANEL_WIDTH = 280;
 /**
  * 尺寸下限：小到控件自己装不下为止。
@@ -270,6 +278,23 @@ function releaseEditor(): void {
   }
 }
 
+/**
+ * 当这个浮窗没画过。
+ *
+ * 关闭按钮把浮窗从页面上拿掉，但渲染层手里那份"上一次的视图"还在——授权状态一变、
+ * 或会话里的样子读回来，重画一次就又把它画了回来。关掉就该忘掉，
+ * 下次要显示得由内容脚本重新调 renderPanel。
+ */
+function forgetRendered(): void {
+  releaseEditor();
+  viewportObserver?.disconnect();
+  viewportObserver = null;
+  host = null;
+  lastView = null;
+  lastActions = null;
+  rendered = null;
+}
+
 /** 位置先落在右上角，之后跟着用户拖到哪儿算哪儿。 */
 function place(element: HTMLElement, fallbackWidth: number): void {
   const start = position ?? {
@@ -305,6 +330,11 @@ function watchViewport(): void {
   viewportObserver.observe(document.documentElement);
 }
 
+/** 这一次要不要在设置区下面挂上隐私声明。只有真的把文字发出去过的结局才挂。 */
+function needsPrivacyNotice(view: PanelView): boolean {
+  return (view.kind === 'result' || view.kind === 'failure') && view.privacyNotice;
+}
+
 function createPanel(view: PanelView, actions: PanelActions): HTMLElement {
   const panel = createContainer();
   const body = createBody();
@@ -313,6 +343,9 @@ function createPanel(view: PanelView, actions: PanelActions): HTMLElement {
   panel.append(header, body);
   if (autoOpenEditor) {
     panel.append(createAutoOpenEditor(actions));
+  }
+  if (needsPrivacyNotice(view)) {
+    panel.append(createPrivacyNotice());
   }
 
   switch (view.kind) {
@@ -618,6 +651,49 @@ function createResult(analysis: AtmosphereAnalysis): HTMLElement[] {
 }
 
 /**
+ * 一次性隐私声明：面板里的一块区域，压在设置区下面，与正文一样用一条线隔开。
+ *
+ * 它出现的那一次，正好是用户第一次看到"文字要出本机"，所以只在这里说，不占固定位置、
+ * 也不做成设置项。做成一块区域、且带标题，是因为它是一条声明——混在结果里读着像结果的
+ * 又一句。关掉只是收起这一块：说过没有在显示的时候就已经记下了。
+ *
+ * 措辞取 shared/privacy 里最短的那句：一次性提示的版面只够说清"文字发到服务器判断、
+ * 服务器不留"，"什么时候发"和最后一环留给设置里的完整声明。
+ */
+function createPrivacyNotice(): HTMLElement {
+  const region = document.createElement('div');
+  // 与设置区同一套间距：线上面的 6px 是上一块自带的，线下面给 12px
+  region.style.cssText = [
+    'margin-top: 6px',
+    'padding-top: 12px',
+    'border-top: 1px solid rgba(255, 255, 255, 0.1)',
+    'font-size: 13px',
+  ].join(';');
+
+  const head = document.createElement('div');
+  head.style.cssText =
+    'display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px';
+
+  const title = document.createElement('span');
+  title.textContent = PRIVACY_TEXT.title;
+  title.style.fontWeight = '600';
+
+  const close = createIconButton('close', '关闭隐私声明', () => {
+    region.remove();
+  });
+
+  head.append(title, close);
+
+  const sentence = document.createElement('div');
+  sentence.textContent = PRIVACY_TEXT.brief;
+  // 和其他正文一样自带 6px 下边距：面板底部那一圈留白因此处处一样
+  sentence.style.cssText = 'opacity: 0.8; margin-bottom: 6px';
+
+  region.append(head, sentence);
+  return region;
+}
+
+/**
  * 分数：数字占主位，等级降成它旁边的次要标签。
  *
  * 之前两者挤在同一行、字号也只差两级，扫一眼分不出哪个才是结论。
@@ -734,6 +810,7 @@ function createHeader(actions: PanelActions): HTMLElement {
     // 关闭后下次再点图标应当是展开的面板，所以顺带把折叠状态复位
     minimized = false;
     rememberState();
+    forgetRendered();
     actions.close();
   });
 
@@ -755,9 +832,11 @@ function createHeader(actions: PanelActions): HTMLElement {
 function createAutoOpenEditor(actions: PanelActions): HTMLElement {
   const area = document.createElement('div');
   // 与正文分开：一条细线加两侧留白。只靠拉开距离，在窄浮窗里很难看出这是另一块。
-  // 线上面算上正文末行自带的 6px，两侧正好各 12px
+  // 线上面算上正文末行自带的 6px，两侧正好各 12px。
+  // 下边距 6px 是为了它后面（隐私声明）或面板底边都保持同样的 12px 与 18px
   area.style.cssText = [
     'margin-top: 6px',
+    'margin-bottom: 6px',
     'padding-top: 12px',
     'border-top: 1px solid rgba(255, 255, 255, 0.1)',
   ].join(';');

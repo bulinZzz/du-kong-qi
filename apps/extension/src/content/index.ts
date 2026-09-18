@@ -7,6 +7,7 @@ import {
 } from './extract';
 import { type PanelActions, type PanelTarget, renderPanel, restorePanelState, setAutoOpen } from './panel';
 import { loadPanelState, rememberPanelState } from './panel-state';
+import { takePrivacyNotice } from './privacy-notice';
 import {
   type DiscussionSnapshot,
   hasContentChanged,
@@ -28,16 +29,23 @@ import type { AnalysisOutcome, AtmosphereAnalysis } from '../shared/protocol';
 const HOST_ID = 'du-kong-qi-host';
 
 /**
- * 上一次注入登记的两个监听器。
+ * 上一次注入登记的东西。
  *
  * 工具栏每点一次就会注入一次脚本，扩展重新加载后页面里还留着上一版脚本的宿主元素，
  * 只听"宿主在不在"会让新脚本直接退出——新扩展上下文里没有监听者，浮窗就再也打不开。
- * 所以这里只复用宿主、换上新监听器，并摘掉旧的。
+ * 所以这里只复用宿主、换上新监听器，并摘掉旧的；旧的还得停手（见 shutdown）：
+ * 它同样画在这个影子根上，也在读这个页面。
  */
 const world = globalThis as typeof globalThis & {
   __duKongQi?: {
     listener: (message: ExtensionMessage) => void;
     onStorageChanged: () => void;
+    /**
+     * 停掉这一份脚本在做的事：轮询，以及还在等结论的那一轮分析。
+     *
+     * 可以不填：扩展升级后，页面里登记的还是上一版脚本的对象，它没有这个方法。
+     */
+    shutdown?: () => void;
   };
 };
 
@@ -48,6 +56,16 @@ let watchTimer: number | null = null;
 let lastAnalysis: AtmosphereAnalysis | null = null;
 
 /**
+ * 这一次分析的凭据：为空表示没有正在进行、也不该再画的分析。
+ *
+ * 分析要等——等评论区加载，等模型判断，中间隔着好几秒。用户完全可能在这期间关掉浮窗，
+ * 或者再点一次重新分析。光把 DOM 清掉不够：等回来的那段代码还会往同一个影子根里画一次，
+ * 浮窗就自己回来了，两轮分析也会互相覆盖。所以每次分析开始时换一个新凭据、关闭时清空，
+ * 异步返回后对不上就不再往下画。值本身没有内容，只回答"我还是不是当前那一次"。
+ */
+let currentRun: object | null = null;
+
+/**
  * 内容脚本入口：注入时只准备宿主元素，收到后台指令后才提取正文并渲染浮窗。
  * 每次点击都重新提取，这样页面内容变了之后重新分析拿到的就是新的文本。
  */
@@ -56,6 +74,8 @@ function start(): void {
   if (previous !== undefined) {
     chrome.runtime.onMessage.removeListener(previous.listener);
     chrome.storage.onChanged.removeListener(previous.onStorageChanged);
+    // 摘掉监听器只是让它收不到新指令；它还在等的那一轮、还在跑的轮询得另外停掉
+    previous.shutdown?.();
   }
 
   const host = document.getElementById(HOST_ID) ?? createHost();
@@ -73,7 +93,7 @@ function start(): void {
     void syncAutoOpen();
   };
 
-  world.__duKongQi = { listener, onStorageChanged };
+  world.__duKongQi = { listener, onStorageChanged, shutdown };
   chrome.runtime.onMessage.addListener(listener);
   chrome.storage.onChanged.addListener(onStorageChanged);
   void syncAutoOpen();
@@ -111,17 +131,21 @@ function createHost(): HTMLElement {
  */
 async function runAnalysis(host: PanelTarget): Promise<void> {
   stopWatching();
+  const run = beginRun();
 
   const current = extractDiscussion();
   if (current.status === 'ready') {
-    await analyzeAndShow(host, current);
+    await analyzeAndShow(host, current, run);
     return;
   }
 
   renderPanel(host, { kind: 'loading', phase: 'readingComments' }, createActions(host));
   const loaded = await loadDiscussionQuietly();
+  if (!isCurrentRun(run)) {
+    return;
+  }
   if (loaded.status === 'ready') {
-    await analyzeAndShow(host, loaded);
+    await analyzeAndShow(host, loaded, run);
     return;
   }
   renderPanel(host, { kind: 'empty', retried: false }, createActions(host));
@@ -129,27 +153,44 @@ async function runAnalysis(host: PanelTarget): Promise<void> {
 
 /** 兜底路径：用户点了按钮，这次位移是他换来的。 */
 async function readByScrolling(host: PanelTarget): Promise<void> {
+  const run = beginRun();
   renderPanel(host, { kind: 'loading', phase: 'readingComments' }, createActions(host));
 
   const content = await loadDiscussionByScrolling();
+  if (!isCurrentRun(run)) {
+    return;
+  }
   if (content.status === 'notReady') {
     renderPanel(host, { kind: 'empty', retried: true }, createActions(host));
     return;
   }
-  await analyzeAndShow(host, content);
+  await analyzeAndShow(host, content, run);
 }
 
-async function analyzeAndShow(host: PanelTarget, content: DiscussionReady): Promise<void> {
+async function analyzeAndShow(
+  host: PanelTarget,
+  content: DiscussionReady,
+  run: object,
+): Promise<void> {
   renderPanel(host, { kind: 'loading', phase: 'analyzing' }, createActions(host));
 
   const sample = takeSample(content.text);
   const outcome = await requestAnalysis(sample);
+  // 用户已经关了浮窗，或又开了新的一轮：这次不再画，说明也不记——
+  // 等下一次分析跟着结局一起说，总好过记成"说过"而其实没人看见
+  if (!isCurrentRun(run)) {
+    return;
+  }
+
+  // 说明挂在"文字已经发出去"这件事上，与模型答没答出来无关：内容太少这类失败，
+  // 文字照样到了服务器，那时不说，就得等到某次成功才补上，告知就晚于事实了
+  const privacyNotice = await takePrivacyNotice();
 
   if (outcome.status === 'ok') {
     lastAnalysis = outcome.analysis;
     renderPanel(
       host,
-      { kind: 'result', analysis: outcome.analysis, expired: false },
+      { kind: 'result', analysis: outcome.analysis, expired: false, privacyNotice },
       createActions(host),
     );
     watchForChanges(host, snapshotOf(sample));
@@ -157,7 +198,30 @@ async function analyzeAndShow(host: PanelTarget, content: DiscussionReady): Prom
   }
 
   lastAnalysis = null;
-  renderPanel(host, { kind: 'failure', reason: outcome.reason }, createActions(host));
+  renderPanel(host, { kind: 'failure', reason: outcome.reason, privacyNotice }, createActions(host));
+}
+
+/** 开始一轮分析：发一个新凭据，让此前还在等的那一轮作废。 */
+function beginRun(): object {
+  const run = {};
+  currentRun = run;
+  return run;
+}
+
+/** 这一轮还是不是当前那一次。收工会让当前凭据清空。 */
+function isCurrentRun(run: object): boolean {
+  return currentRun === run;
+}
+
+/**
+ * 停掉这一份脚本在做的事。
+ *
+ * 用户关掉浮窗、或新一份脚本接手时都要走这里：前者是他主动收工，后者说明这一份已经不是
+ * 当前那一个了（页面里注入的脚本不止一份，画的却是同一个影子根）。
+ */
+function shutdown(): void {
+  stopWatching();
+  currentRun = null;
 }
 
 /**
@@ -202,7 +266,7 @@ function checkChanges(host: PanelTarget, baseline: DiscussionSnapshot): void {
     stopWatching();
     renderPanel(
       host,
-      { kind: 'result', analysis: lastAnalysis, expired: true },
+      { kind: 'result', analysis: lastAnalysis, expired: true, privacyNotice: false },
       createActions(host),
     );
   }
@@ -231,8 +295,8 @@ function createActions(host: PanelTarget): PanelActions {
       void runAnalysis(host);
     },
     close: () => {
-      // 关掉浮窗同时停掉轮询：用户主动收工时不该还在读页面
-      stopWatching();
+      // 用户主动收工：不该还在读页面，也不该让还在等结论的那段代码把浮窗又画回来
+      shutdown();
       lastAnalysis = null;
       host.replaceChildren();
     },

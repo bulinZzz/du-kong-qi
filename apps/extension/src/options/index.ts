@@ -5,6 +5,7 @@ import {
   listAutoOpenOrigins,
   permissionPatternOf,
 } from '../shared/auto-open';
+import { PRIVACY_TEXT } from '../shared/privacy';
 
 /**
  * 设置页面。
@@ -27,6 +28,9 @@ const embedded = params.get('embed') === '1';
 
 /** 上一次操作的反馈。显示过一次就清掉，免得下次重画又冒出来。 */
 let notice: string | null = null;
+
+/** 隐私声明是否展开。它管的是"事后想确认"，所以默认收起，点开才占版面。 */
+let statementOpen = false;
 
 /** 重画当前视图：站点视图，或用户自己打开时的已开启列表。 */
 function render(): void {
@@ -77,30 +81,46 @@ async function renderSiteList(): Promise<void> {
   paint(card);
 }
 
-/** 落一次 DOM 并收尾：隐私说明，提示，以及嵌在浮窗里时把高度报回去。 */
+/** 落一次 DOM 并收尾：隐私声明入口、提示，以及嵌在浮窗里时把高度报回去。 */
 function paint(card: HTMLElement): void {
-  card.append(privacy());
+  card.append(...createPrivacyStatement());
   app().replaceChildren(card);
   appendNotice(card);
   reportHeight();
 }
 
 /**
- * 隐私说明。
+ * 隐私声明的入口：一行标签加一个动作，点开就地展开，再点收起。
  *
- * 讨论内容会离开浏览器，这件事得在扩展里说清楚，不能只写在商店页面里。
- * 三件事按用户会问的顺序说：发什么、服务器留不留、以及不想要时怎么办。
+ * 它管的是"事后想确认"——第一次把文字发出去时，浮窗里已经说过一次最短的那句；
+ * 完整的声明放在这里：什么时候发、最后一环留给谁，都由用户自己来看。
+ * 写在设置里而不是正文里，是因为它是设置的一部分，不该跟着分析结果的长短浮动。
  */
-function privacy(): HTMLElement {
+function createPrivacyStatement(): Node[] {
+  const button = action(statementOpen ? '收起' : '查看', 'plain', () => {
+    statementOpen = !statementOpen;
+    render();
+  });
+  button.setAttribute('aria-expanded', String(statementOpen));
+  // 读屏器只念"查看"说不清看的是什么，补上对象；开头仍是同一个动作词，不违背可见文案
+  button.setAttribute('aria-label', `${statementOpen ? '收起' : '查看'}隐私声明`);
+
+  const nodes: Node[] = [row(paragraph(PRIVACY_TEXT.title, 'muted'), button)];
+  if (statementOpen) {
+    nodes.push(statement());
+  }
+  return nodes;
+}
+
+/** 声明的正文：什么时候发、谁在判断、最后一环留给谁、以及用户能怎么办。 */
+function statement(): HTMLElement {
   const block = document.createElement('div');
-  block.className = 'privacy';
+  block.className = 'statement';
   block.append(
-    subheading('隐私'),
-    paragraph(
-      '分析时会把当前页面的讨论文字（开头一段）发到读空气的服务器，由它交给模型服务判断；服务器不保存这些文字。',
-      'muted',
-    ),
-    paragraph('你授权过的网站上，打开页面会自动分析一次；结论留在浏览器本地，内容没变就不再请求。', 'muted'),
+    paragraph(PRIVACY_TEXT.when, 'muted'),
+    paragraph(PRIVACY_TEXT.judgement, 'muted'),
+    paragraph(PRIVACY_TEXT.retention, 'muted'),
+    paragraph(PRIVACY_TEXT.control, 'muted'),
   );
   return block;
 }
@@ -181,12 +201,6 @@ function app(): HTMLElement {
 
 function heading(text: string): HTMLElement {
   const element = document.createElement('h1');
-  element.textContent = text;
-  return element;
-}
-
-function subheading(text: string): HTMLElement {
-  const element = document.createElement('h2');
   element.textContent = text;
   return element;
 }

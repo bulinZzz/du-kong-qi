@@ -38,25 +38,8 @@
         font-weight: 600;
       }
 
-      h2 {
-        margin: 0 0 6px;
-        font-size: 13px;
-        font-weight: 600;
-      }
-
       p {
         margin: 0;
-      }
-
-      /* 内容会离开浏览器，这件事要在扩展里说清，所以放在设置里而不是只写在商店页面 */
-      .privacy {
-        margin-top: 16px;
-        padding-top: 12px;
-        border-top: 1px solid rgba(255, 255, 255, 0.1);
-      }
-
-      .privacy p + p {
-        margin-top: 6px;
       }
 
       .muted {
@@ -90,6 +73,15 @@
       .notice {
         margin-top: 12px;
         color: #ffc48a;
+      }
+
+      /* 声明的正文：只在点开时出现，所以比行与行之间贴得近一点 */
+      .statement {
+        margin-top: 6px;
+      }
+
+      .statement p + p {
+        margin-top: 6px;
       }
 
       button {
@@ -164,11 +156,9 @@
         justify-content: flex-start;
       }
 
-      /* 浮窗那边已经在设置区上方画了分隔线，这里不再画第二条 */
-      body.embed .privacy {
-        margin-top: 12px;
-        padding-top: 0;
-        border-top: none;
+      /* 嵌入时行与行之间收紧到 0，第二行起得自己把间距补回来 */
+      body.embed .row + .row {
+        margin-top: 16px;
       }
     </style>
   </head>
