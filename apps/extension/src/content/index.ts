@@ -313,7 +313,8 @@ function checkChanges(host: PanelTarget, baseline: DiscussionSnapshot): void {
 
 /** 请求交给后台：内容脚本的跨域请求受所在页面约束，后台不受。 */
 async function requestAnalysis(text: string): Promise<AnalysisOutcome> {
-  const message: AnalyzeMessage = { type: 'analyze', text };
+  // 站点域名只为后端的用量记录服务：它是"哪个站点读不到内容"的唯一线索
+  const message: AnalyzeMessage = { type: 'analyze', text, site: location.hostname };
 
   try {
     const outcome = (await chrome.runtime.sendMessage(message)) as AnalysisOutcome | undefined;

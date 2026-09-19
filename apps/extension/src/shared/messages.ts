@@ -24,8 +24,11 @@ export function showPanelMessage(auto: boolean): ShowPanelMessage {
  *
  * 请求放后台发出，因为内容脚本的跨域请求受所在页面约束。
  * 响应类型是 shared/protocol.ts 里的 AnalysisOutcome。
+ *
+ * site 是这次读的是哪个站点，只用于后端的用量记录——哪个站点读不到内容、用户还在哪些站想用。
+ * 它不参与分析：指标是绝对值，不该随站点缩放（见开发记录）。
  */
-export type AnalyzeMessage = { type: 'analyze'; text: string };
+export type AnalyzeMessage = { type: 'analyze'; text: string; site: string };
 
 /**
  * 内容脚本 → 后台：为这个站点开启"进入时自动打开"。
@@ -43,7 +46,11 @@ export function isAnalyzeMessage(value: unknown): value is AnalyzeMessage {
   }
 
   const candidate = value as Partial<AnalyzeMessage>;
-  return candidate.type === 'analyze' && typeof candidate.text === 'string';
+  return (
+    candidate.type === 'analyze' &&
+    typeof candidate.text === 'string' &&
+    typeof candidate.site === 'string'
+  );
 }
 
 export function isRequestAutoOpenMessage(value: unknown): value is RequestAutoOpenMessage {

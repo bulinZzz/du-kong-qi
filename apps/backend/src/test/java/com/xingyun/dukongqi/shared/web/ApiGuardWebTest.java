@@ -7,12 +7,17 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.xingyun.dukongqi.module.atmosphere.application.port.AtmosphereAnalyzer;
 import com.xingyun.dukongqi.module.atmosphere.domain.model.AtmosphereAnalysis;
 import com.xingyun.dukongqi.module.atmosphere.domain.model.FlameIntensity;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpHeaders;
@@ -37,7 +42,11 @@ class ApiGuardWebTest {
 
     private static final String LONG_TEXT = "这里是一段足够长的页面文本。".repeat(30);
 
+    private static final Logger USAGE_LOGGER = (Logger) LoggerFactory.getLogger(UsageLogInterceptor.class);
+
     private final WebApplicationContext context;
+
+    private final ListAppender<ILoggingEvent> logged = new ListAppender<>();
 
     private MockMvc mockMvc;
 
@@ -52,6 +61,13 @@ class ApiGuardWebTest {
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.webAppContextSetup(context).build();
+        logged.start();
+        USAGE_LOGGER.addAppender(logged);
+    }
+
+    @AfterEach
+    void detachLogCapture() {
+        USAGE_LOGGER.detachAppender(logged);
     }
 
     @Test
@@ -86,6 +102,24 @@ class ApiGuardWebTest {
     void analyze_should_return_403_without_origin() throws Exception {
         mockMvc.perform(analysis())
                 .andExpect(status().isForbidden());
+    }
+
+    /**
+     * 用量记录必须排在准入与限流之前，否则被挡下的请求不会留下任何痕迹——
+     * 而"有多少请求被挡"正是上线初期要看的东西。
+     */
+    @Test
+    @DisplayName("被挡下的请求也会留下用量记录")
+    void rejected_request_is_still_recorded() throws Exception {
+        mockMvc.perform(analysis()
+                        .header(HttpHeaders.ORIGIN, "https://example.com")
+                        .header(UsageLogInterceptor.SITE_HEADER, "www.bilibili.com"))
+                .andExpect(status().isForbidden());
+
+        assertThat(logged.list).hasSize(1);
+        assertThat(logged.list.get(0).getFormattedMessage())
+                .contains("站点=www.bilibili.com")
+                .contains("状态=403");
     }
 
     private static MockHttpServletRequestBuilder analysis() {

@@ -9,6 +9,9 @@ const BACKEND_BASE_URL = __BACKEND_ORIGIN__;
 /** 一次分析的等待上限：后端还要调模型，比普通接口给得宽一些。 */
 const REQUEST_TIMEOUT_MS = 20000;
 
+/** 站点域名交给后端的请求头名，与后端 UsageLogInterceptor 里的常量对应。 */
+const SITE_HEADER = 'X-Discussion-Site';
+
 /** 兜底窗口的尺寸：放得下标题、一句说明和一个按钮就够。 */
 const AUTHORIZE_WINDOW_WIDTH = 460;
 const AUTHORIZE_WINDOW_HEIGHT = 250;
@@ -123,7 +126,7 @@ async function popupPosition(): Promise<{ left?: number; top?: number }> {
 
 chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
   if (isAnalyzeMessage(message)) {
-    void analyze(message.text).then(sendResponse);
+    void analyze(message.text, message.site).then(sendResponse);
     return true; // 异步响应，保持消息通道打开
   }
 
@@ -137,29 +140,31 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
  * 请求后端做一次空气分析。
  *
  * 失败在这里就分成几类，内容脚本只负责按类别说人话。
- * 同一段内容在一次浏览器会话里只算一次：先查缓存，算完记下。
+ * 同一段内容在一次浏览器会话里只算一次：先查缓存，算完记下——缓存命中不会产生请求，
+ * 所以后端的用量记的是请求数，不是使用次数。
  */
-async function analyze(text: string): Promise<AnalysisOutcome> {
+async function analyze(text: string, site: string): Promise<AnalysisOutcome> {
   const cached = await readCachedAnalysis(text);
   if (cached !== null) {
     return cached;
   }
 
-  const outcome = await requestAnalysis(text);
+  const outcome = await requestAnalysis(text, site);
   // 不等待写入：结论已经拿到了，记缓存不该让用户多等
   void cacheAnalysis(text, outcome);
   return outcome;
 }
 
 /** 真正发出请求的那一半。 */
-async function requestAnalysis(text: string): Promise<AnalysisOutcome> {
+async function requestAnalysis(text: string, site: string): Promise<AnalysisOutcome> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
   try {
     const response = await fetch(`${BACKEND_BASE_URL}/atmosphere/analysis`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      // 站点走请求头：请求体是对外契约里"被分析的内容"，而站点不参与分析，只用于后端记账
+      headers: { 'Content-Type': 'application/json', [SITE_HEADER]: site },
       body: JSON.stringify({ text }),
       signal: controller.signal,
     });
