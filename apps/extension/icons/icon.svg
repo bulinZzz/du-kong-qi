@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="读空气">
+  <!--
+    图标：奶黄圆角方块 + 一张面无表情的脸。
+
+    表情取"不动声色"：读空气是察觉，不是表态，所以不笑也不皱眉。
+    形状比汉字简单得多，16px 下两只眼与一条嘴都还在。
+
+    底与五官的取值、以及各元素的位置都按"缩到 16px 仍看得清"定：
+    眼半径 10、间距 38；嘴宽 28、笔画 10。墨迹 x 35..93、y 42..87，中心落在 64,64.5。
+
+    改这里之后要重新渲染 public/icon16|32|48|128.png。
+  -->
+  <rect width="128" height="128" rx="28" fill="#ffd85e"/>
+  <g fill="#2b2b2b">
+    <circle cx="45" cy="52" r="10"/>
+    <circle cx="83" cy="52" r="10"/>
+  </g>
+  <path d="M50 82 H78" fill="none" stroke="#2b2b2b" stroke-width="10" stroke-linecap="round"/>
+</svg>

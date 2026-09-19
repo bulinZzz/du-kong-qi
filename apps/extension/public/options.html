@@ -5,9 +5,11 @@
     <title>设置</title>
     <style>
       /*
-       * 与浮窗同一套表面：同一个渐变、同一个字体层级、同一个强调色。
+       * 与浮窗同一套表面：同一个渐变、同一个字体层级、同一套配色。
        * 浮窗那层是半透明加背景模糊，这里没有"背后"可透，所以用同一色相的实色。
        * 每一组配色都按 4.5:1 的对比度选过。
+       * 带颜色的只有两处，且都是状态而非装饰：开启中的开关，以及浮窗里那个已开启的设置图标，
+       * 都用与图标同一个奶黄——同一种状态在两处用同一种颜色。
        */
       body {
         margin: 0;
@@ -88,8 +90,8 @@
         padding: 6px 12px;
         border: none;
         border-radius: 6px;
-        background: #3a67e0;
-        color: #fff;
+        background: #f2f3f5;
+        color: #17181c;
         font: inherit;
         cursor: pointer;
       }
@@ -100,7 +102,7 @@
         color: #f5f6f8;
       }
 
-      /* 开关：蓝开灰关，状态自己说话，不靠动词。轨道也用不透明底，免得颜色随渐变位置变 */
+      /* 开关：黄开灰关，状态自己说话，不靠动词。轨道也用不透明底，免得颜色随渐变位置变 */
       .switch {
         position: relative;
         flex: 0 0 auto;
@@ -115,7 +117,7 @@
       }
 
       .switch[aria-checked='true'] {
-        background: #3a67e0;
+        background: #ffd85e;
       }
 
       .switch .knob {
@@ -129,8 +131,10 @@
         transition: left 120ms;
       }
 
+      /* 黄轨道上白点看不清，开启时改用深色点——与图标同一套配色 */
       .switch[aria-checked='true'] .knob {
         left: 18px;
+        background: #17181c;
       }
 
       /*

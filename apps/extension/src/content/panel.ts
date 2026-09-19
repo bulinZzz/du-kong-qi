@@ -67,6 +67,22 @@ const LEVEL_LABELS: Record<AtmosphereLevel, string> = {
 };
 
 /**
+ * 等级对应的颜色：从凉到暖，方向与"火药味"一致。
+ *
+ * 取色看等级而不是看分数：分档的边界在后端，若在这里另立一套分数阈值，两边一旦对不上，
+ * 就会出现"数字是黄的、旁边写着骂战激烈"。同一处取值也让措辞与颜色不可能各说各话。
+ *
+ * 五档都要在深色底上够亮，最低的一档（暖端）对比度约 5.6:1。
+ */
+const LEVEL_COLORS: Record<AtmosphereLevel, string> = {
+  PEACEFUL: '#79c8d4',
+  REASONABLE: '#a8cf82',
+  DEBATING: '#e6c46a',
+  HOSTILE: '#ef9a5b',
+  FIERCE: '#f0705f',
+};
+
+/**
  * 失败文案。
  *
  * "服务不可用"与"网络不通"对用户是同一件事——都是过会儿再试——所以合并成一句；
@@ -123,8 +139,8 @@ const CORNER_SIZE = 16;
 /** 按住后移动超过这个距离才算拖动，否则当成一次点击。 */
 const DRAG_THRESHOLD = 4;
 
-/** 已开启自动打开的站点，设置图标用这个颜色：压在深色玻璃上对比度约 7:1。 */
-const ACTIVE_ICON_COLOR = '#8ab0ff';
+/** 已开启自动打开的站点，设置图标用这个颜色：与图标底色同一个奶黄，压在深色玻璃上对比度约 10:1。 */
+const ACTIVE_ICON_COLOR = '#ffd85e';
 
 /** 授权界面嵌进来之后，等它自报高度的时间；等不到就当这一页不允许嵌扩展页面。 */
 const EDITOR_TIMEOUT_MS = 1000;
@@ -134,9 +150,10 @@ const EDITOR_TIMEOUT_MS = 1000;
  *
  * 面板与圆片共用同一套，收起前后看起来是同一个东西。
  * 半透明必须配描边与模糊：没有描边，它在浅色页面上会糊成一片。
+ * 保持深色是功能性的：浮窗压在别人的页面上，页面背景不可控，深底白字才保证读得清。
  */
 const SURFACE = [
-  'background: linear-gradient(160deg, rgba(40, 46, 61, 0.86), rgba(22, 26, 35, 0.9))',
+  'background: linear-gradient(160deg, rgba(35, 46, 78, 0.88), rgba(17, 22, 40, 0.92))',
   'backdrop-filter: blur(12px) saturate(1.15)',
   'border: 1px solid rgba(255, 255, 255, 0.1)',
   'color: #f5f6f8',
@@ -439,6 +456,8 @@ function createPanel(view: PanelView, actions: PanelActions): HTMLElement {
 /** 折叠成一枚圆片：顺手把分数摆在上面，收起也能看到读数。 */
 function createChip(view: PanelView): HTMLElement {
   const score = view.kind === 'result' ? String(view.analysis.flameIntensity) : null;
+  // 收起之后只剩这一个数字，颜色是它唯一还能带上冷热的地方
+  const color = view.kind === 'result' ? LEVEL_COLORS[view.analysis.level] : null;
 
   const chip = document.createElement('button');
   chip.textContent = score ?? '空气';
@@ -456,9 +475,12 @@ function createChip(view: PanelView): HTMLElement {
     'padding: 0',
     'border-radius: 50%',
     'font: 600 18px/1 system-ui, sans-serif',
+    color === null ? '' : `color: ${color}`,
     'box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32)',
     'cursor: pointer',
-  ].join(';');
+  ]
+    .filter((rule) => rule !== '')
+    .join(';');
 
   // 展开走 click，不走指针事件：键盘回车也要能展开
   chip.addEventListener('click', () => {
@@ -763,11 +785,16 @@ function createPrivacyNotice(): HTMLElement {
  *
  * 三者都挤在同一行、字号也只差两级时，扫一眼分不出哪个才是结论——所以数字最大，另外两个
  * 都是 13px 的次要标签；窄到放不下时换行，而不是被裁掉。
+ *
+ * 只有数字着色：两个 13px 的次要标签一起上色，这一行会像被划了重点，主次也一起被抹平。
+ * 冷热由数字和下面那条刻度一起说——刻度按分数铺满、颜色随等级，两者都取自后端。
  */
 function createScore(analysis: AtmosphereAnalysis): HTMLElement {
+  const color = LEVEL_COLORS[analysis.level];
+
   const line = document.createElement('div');
   line.style.cssText =
-    'display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin-bottom: 8px';
+    'display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin-bottom: 6px';
 
   const metric = document.createElement('span');
   metric.textContent = METRIC_LABEL;
@@ -775,14 +802,27 @@ function createScore(analysis: AtmosphereAnalysis): HTMLElement {
 
   const score = document.createElement('span');
   score.textContent = String(analysis.flameIntensity);
-  score.style.cssText = 'font-size: 26px; font-weight: 600; line-height: 1.1';
+  score.style.cssText = `font-size: 26px; font-weight: 600; line-height: 1.1; color: ${color}`;
 
   const level = document.createElement('span');
   level.textContent = LEVEL_LABELS[analysis.level];
   level.style.cssText = 'font-size: 13px; opacity: 0.85';
 
   line.append(metric, score, level);
-  return line;
+
+  const track = document.createElement('div');
+  track.style.cssText =
+    'height: 4px; border-radius: 999px; background: rgba(255, 255, 255, 0.14); overflow: hidden';
+
+  const filled = document.createElement('div');
+  filled.style.cssText = `height: 100%; width: ${analysis.flameIntensity}%; border-radius: 999px; background: ${color}`;
+
+  track.append(filled);
+
+  const region = document.createElement('div');
+  region.style.cssText = 'margin-bottom: 8px';
+  region.append(line, track);
+  return region;
 }
 
 /** 依据做成列表：三条以内的短句比一段话更容易扫过去。 */
@@ -1079,8 +1119,9 @@ function createButton(label: string, onClick: () => void): HTMLElement {
     'padding: 6px 10px',
     'border: none',
     'border-radius: 6px',
-    'background: #3a67e0',
-    'color: #fff',
+    // 中性底：面板里带颜色的只剩读数刻度，主按钮不该再自成一个色
+    'background: #f2f3f5',
+    'color: #17181c',
     'font: inherit',
     'cursor: pointer',
   ].join(';');
