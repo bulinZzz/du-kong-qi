@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>读空气 隐私政策</title>
+  <style>
+    :root {
+      color-scheme: light;
+    }
+
+    body {
+      margin: 0;
+      padding: 48px 20px 72px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      font-size: 16px;
+      line-height: 1.8;
+      color: #24292f;
+      background: #ffffff;
+    }
+
+    main {
+      max-width: 640px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 26px;
+      line-height: 1.4;
+    }
+
+    h2 {
+      margin: 40px 0 8px;
+      font-size: 17px;
+    }
+
+    p {
+      margin: 0 0 12px;
+    }
+
+    .updated {
+      margin-bottom: 32px;
+      font-size: 14px;
+      color: #6e7781;
+    }
+
+    .lead {
+      padding: 16px 18px;
+      border-radius: 8px;
+      background: #f6f8fa;
+    }
+
+    ul {
+      margin: 0 0 12px;
+      padding-left: 22px;
+    }
+
+    li {
+      margin-bottom: 6px;
+    }
+
+    footer {
+      margin-top: 48px;
+      padding-top: 16px;
+      border-top: 1px solid #d8dee4;
+      font-size: 14px;
+      color: #6e7781;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>读空气 隐私政策</h1>
+  <p class="updated">最后更新：2026 年 9 月 19 日</p>
+
+  <p class="lead">
+    读空气会把你正在看的网页里的<strong>讨论文字</strong>发送到读空气的服务器，由服务器交给大模型判断这个讨论空间的火药味，
+    再把结果返回你的浏览器。服务器不保存这些文字。<strong>扩展没有账号体系，不知道你是谁。</strong>
+  </p>
+
+  <h2>会发送什么</h2>
+  <p>只有网页里的讨论文字：评论、回答、回帖这类内容。每次最多一万字，取的是页面当前已经加载出来的那一段。</p>
+  <p>两种时候会发送：</p>
+  <ul>
+    <li>你在扩展里点开读空气；</li>
+    <li>你为某个网站打开过自动分析，之后进入该网站时。</li>
+  </ul>
+
+  <h2>不会发送什么</h2>
+  <p>不发送网址，不发送页面标题，不发送你的浏览记录，也不发送你在页面上的操作。</p>
+
+  <h2>服务器怎么处理</h2>
+  <p>服务器不保存讨论正文：它把文字转交给大模型服务用于本次判断，判断结束即丢弃，也不写入日志。</p>
+  <p>判断由第三方大模型服务完成——这些文字会到达该服务，它是否留存由其自身政策决定，读空气无从确认。</p>
+
+  <h2>浏览器本地保存了什么</h2>
+  <ul>
+    <li>分析结论（分数与说明）：存在浏览器的会话存储里，关掉浏览器就清空；</li>
+    <li>你授权自动分析的网站列表、面板位置、隐私声明是否已读：存在浏览器本地；</li>
+    <li>为避免同一段内容重复请求，扩展用内容的哈希值作为缓存键——键与结论都只在你本机。</li>
+  </ul>
+
+  <h2>你能怎么控制</h2>
+  <p>没有为任何网站打开自动分析时，只有你点开读空气才会发送内容。设置里可以随时关掉某个网站的自动分析；清除浏览器数据即可抹掉本地保存的结论与偏好。</p>
+
+  <h2>扩展申请了哪些权限</h2>
+  <ul>
+    <li><strong>读取当前标签页</strong>：你不点开读空气时，扩展不读页面内容；</li>
+    <li><strong>存储</strong>：保存上面那些留在你本机的数据；</li>
+    <li><strong>你授权过的网站</strong>：只有你为某个网站打开自动分析后，扩展才会在该网站自动读取讨论文字。其他网站永远需要你点一下。</li>
+  </ul>
+
+  <h2>政策变更与联系方式</h2>
+  <p>政策如有修改，会更新本页顶部的日期。任何疑问请联系：<a href="mailto:674494205@qq.com">674494205@qq.com</a>。</p>
+</main>
+<footer>读空气</footer>
+</body>
+</html>

@@ -166,6 +166,18 @@ class ArchitectureTest {
             );
 
     /**
+     * Rule 9：shared 不得依赖任何模块。
+     *
+     * <p>shared 是各模块共同的支撑，依赖方向只能由模块指向 shared。反过来依赖，shared 就被
+     * 某个模块的实现细节绑住，也就失去了"独立于具体业务模块"的资格。
+     */
+    @ArchTest
+    static final ArchRule shared_must_not_depend_on_modules = noClasses()
+            .that().resideInAPackage(BASE + ".shared..")
+            .should().dependOnClassesThat()
+            .resideInAPackage(MODULES + "..");
+
+    /**
      * 检查跨模块依赖是否只落在目标模块公开契约范围内。
      */
     private static final class CrossModuleThroughPublicContractCondition
