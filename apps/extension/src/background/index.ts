@@ -3,8 +3,8 @@ import { isAnalyzeMessage, isRequestAutoOpenMessage, showPanelMessage } from '..
 import { type AnalysisOutcome, isAtmosphereAnalysis } from '../shared/protocol';
 import { cacheAnalysis, readCachedAnalysis } from './analysis-cache';
 
-/** 后端地址。开发期指向本机，部署确定后再改。 */
-const BACKEND_BASE_URL = 'http://localhost:8080';
+/** 后端地址：开发期指向本机，发布时由构建注入（见 vite.config.background.ts）。 */
+const BACKEND_BASE_URL = __BACKEND_ORIGIN__;
 
 /** 一次分析的等待上限：后端还要调模型，比普通接口给得宽一些。 */
 const REQUEST_TIMEOUT_MS = 20000;

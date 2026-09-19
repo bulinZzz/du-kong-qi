@@ -3,8 +3,20 @@
   "name": "读空气",
   "version": "0.1.0",
   "description": "让 AI 帮你读懂互联网的空气",
+  "icons": {
+    "16": "icon16.png",
+    "32": "icon32.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
   "action": {
-    "default_title": "读空气"
+    "default_title": "读空气",
+    "default_icon": {
+      "16": "icon16.png",
+      "32": "icon32.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
   },
   "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": ["http://localhost:8080/*"],
